@@ -227,10 +227,14 @@ static int read_exact(int fd, uint8_t *data, size_t size){
 uint16_t comb_ui8_2_ui16(const uint8_t high_byte,const uint8_t lower_byte);
 int input_f4_data(struct format4_data *f4_data,uint16_t data,int f4_mem_counter);
 int format4_data_parse(int ttf_fd,struct format4_data *f4_data);
-struct cmap_format4_segment *found_input_chr_range(struct format4_data *f4_data,uint16_t input_data);
+struct cmap_format4_segment *found_input_chr_range(
+        const struct format4_data *f4_data,uint16_t input_data);
 
 
-uint16_t  get_glyph_id(struct format4_data f4_data,struct cmap_format4_segment f4_seg_data);
+int get_glyph_id(
+        const struct format4_data *f4_data,
+        const struct cmap_format4_segment *f4_seg_data,
+        uint16_t *glyph_id);
 
 int main(){
         //osチェック
@@ -347,15 +351,46 @@ int main(){
         uint16_t chr = 'A';
       
         struct cmap_format4_segment *segment_data = found_input_chr_range(f4_data,chr);
+        int main_result = 0;
         if(segment_data == NULL){
-                printf("segment allocate error");
-                return 1;
+                printf("character segment not found\n");
+                main_result = 1;
+                goto cleanup;
         }
 
         printf("range st = %u ed = %u segmentnum = %d ",segment_data->segment.start,
                 segment_data->segment.end,segment_data->segment.segment_num);
 
+        uint16_t glyph_id = 0;
+        if(get_glyph_id(f4_data,segment_data,&glyph_id) != 0){
+                printf("glyph ID lookup error\n");
+                main_result = 1;
+                goto cleanup;
+        }
+        printf("glyph id = %u\n",glyph_id);
 
+        /*
+         * 再開メモ（2026-07-22）: glyph IDからglyfデータの位置を求める。
+         *
+         * 1. Table Directoryから"head"、"loca"、"glyf"、"maxp"を探し、
+         *    各テーブルのoffsetとlengthを取得する。
+         * 2. maxp.numGlyphsを読み、glyph_idがnumGlyphs未満か確認する。
+         * 3. headテーブル先頭から50バイト目のindexToLocFormatを読む。
+         *    indexToLocFormat == 0: locaはuint16_t配列（Short形式）。
+         *    indexToLocFormat == 1: locaはuint32_t配列（Long形式）。
+         * 4. loca[glyph_id]とloca[glyph_id + 1]をビッグエンディアンで読む。
+         *    Short形式では、読み取った各値を2倍してglyf内相対offsetにする。
+         *    Long形式では、読み取った値をそのまま相対offsetとして使う。
+         * 5. glyph開始位置 = glyf_offset + loca[glyph_id]、
+         *    glyph終了位置 = glyf_offset + loca[glyph_id + 1]として計算する。
+         * 6. 開始位置 <= 終了位置、終了相対offset <= glyf.lengthを確認する。
+         *    開始位置 == 終了位置なら輪郭を持たないglyphとして扱う。
+         * 7. glyph開始位置へ移動し、glyfヘッダーの10バイトを読む。
+         *    numberOfContours、xMin、yMin、xMax、yMaxはint16_tとして扱う。
+         *    numberOfContours >= 0なら単純glyph、負数なら複合glyphを解析する。
+         * 8. read_exactとlseekの戻り値を毎回確認し、途中失敗時も確保済み
+         *    メモリとファイルディスクリプタを解放できるようにする。
+         */
       
 
         
@@ -372,6 +407,8 @@ int main(){
         
 
 
+cleanup:
+        free(segment_data);
         free(table_dir_data.tableRecords);
         free(cmap_encoding_record);
         free(selected_encoding_record);
@@ -381,7 +418,7 @@ int main(){
         free(f4_data->id_range_offset);
         free(f4_data->glyph_id_array);
         free(f4_data);
-        return 0;
+        return main_result;
 }
 
 
@@ -743,41 +780,58 @@ int input_f4_data(struct format4_data *f4_data,uint16_t data,int f4_mem_counter)
         return 0;
 }
 
-struct cmap_format4_segment *found_input_chr_range(struct format4_data *f4_data,uint16_t input_data){
+struct cmap_format4_segment *found_input_chr_range(
+        const struct format4_data *f4_data,uint16_t input_data){
         if(f4_data == NULL)return NULL;
-        uint16_t tmp_range[2] = {0};
-        int segment_num = 0;
-        bool found = false;
+
         for(int i=0;i < f4_data->seg_count;i++){
-                if(f4_data->end_code[i] > input_data && f4_data->start_code[i] < input_data){
-                        tmp_range[0] = f4_data->start_code[i];
-                        tmp_range[1] = f4_data->end_code[i];
-                        segment_num = i;
-                        found = true;
-                }
+                if(f4_data->start_code[i] > input_data ||
+                        input_data > f4_data->end_code[i])continue;
+
+                struct cmap_format4_segment *f4_format_seg =
+                        malloc(sizeof(*f4_format_seg));
+                if(f4_format_seg == NULL)return NULL;
+
+                f4_format_seg->chr = input_data;
+                f4_format_seg->segment.segment_num = i;
+                f4_format_seg->segment.start = f4_data->start_code[i];
+                f4_format_seg->segment.end = f4_data->end_code[i];
+                return f4_format_seg;
         }
-        if(found == false)return NULL;
-
-        struct cmap_format4_segment *f4_format_seg = malloc(sizeof(struct cmap_format4_segment ) * 2);
-        if(f4_format_seg == NULL) return NULL;
-        f4_format_seg->chr = input_data;
-        f4_format_seg->segment.segment_num = segment_num;
-        f4_format_seg->segment.end = tmp_range[1];
-        f4_format_seg->segment.start = tmp_range[0];
-
-        return f4_format_seg;
+        return NULL;
 }
 
 
-uint16_t  get_glyph_id(struct format4_data f4_data,struct cmap_format4_segment f4_seg_data){
-        uint16_t glyph_id = 0;
-        if(f4_data.id_range_offset[f4_seg_data.segment.segment_num] == 0){
-                glyph_id = f4_seg_data.chr + f4_data.id_delta[f4_seg_data.segment.segment_num];
+int get_glyph_id(
+        const struct format4_data *f4_data,
+        const struct cmap_format4_segment *f4_seg_data,
+        uint16_t *glyph_id){
+        if(f4_data == NULL || f4_seg_data == NULL || glyph_id == NULL)return -1;
+
+        int segment_num = f4_seg_data->segment.segment_num;
+        if(segment_num < 0 || segment_num >= f4_data->seg_count)return -1;
+
+        uint16_t range_offset = f4_data->id_range_offset[segment_num];
+        if(range_offset == 0){
+                *glyph_id = (uint16_t)(f4_seg_data->chr +
+                        f4_data->id_delta[segment_num]);
+                return 0;
         }
-        else{
-                glyph_id = f4_data.id_range_offset[f4_seg_data.segment.segment_num] +
-                        f4_data.id_range_offset[f4_seg_data.segment.segment_num] + 
-                        (f4_seg_data.chr - f4_seg_data.segment.start);
+
+        if((range_offset & 1u) != 0 || f4_data->glyph_id_array == NULL)return -1;
+
+        int64_t glyph_array_num = (int64_t)(range_offset / 2u) +
+                (int64_t)(f4_seg_data->chr - f4_seg_data->segment.start) -
+                ((int64_t)f4_data->seg_count - segment_num);
+        if(glyph_array_num < 0 ||
+                (uint64_t)glyph_array_num >= f4_data->glyph_id_count)return -1;
+
+        uint16_t glyph_value = f4_data->glyph_id_array[glyph_array_num];
+        if(glyph_value == 0){
+                *glyph_id = 0;
+                return 0;
         }
-        return glyph_id;
+
+        *glyph_id = (uint16_t)(glyph_value + f4_data->id_delta[segment_num]);
+        return 0;
 }
