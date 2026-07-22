@@ -1175,7 +1175,7 @@ int parse_2byte_loca_table(
                 loca_offsets[i] = ui16_data;
         }
 
-        loca_table_2byte_format->offset_count = allocate_size;
+        loca_table_2byte_format->offset_count = allocate_num;
 
         return 0;
 }
@@ -1221,7 +1221,7 @@ int parse_4byte_loca_table(
                 offsets[i] = read_be32(ui8_data_storage);
                               
         }
-        loca_table_4byte_format->offset_count = (size_t)allocate_size;
+        loca_table_4byte_format->offset_count = (size_t)allocate_num;
         return 0;
 }
 
@@ -1232,7 +1232,7 @@ uint16_t get_2b_loca_arry_num_data(struct loca_table_2byte_format loca_table_2b,
                 printf("loca_table_2b offsets is NULL\n");
                 return 0;
         }
-        if(num < 0 || num > loca_table_2b.offset_count){
+        if(num < 0 || (size_t)num >= loca_table_2b.offset_count){
                 printf("set loca table arry num error\n");
                 return 0;
         }
@@ -1245,7 +1245,7 @@ uint32_t get_4b_loca_arry_num_data(struct loca_table_4byte_format loca_table_4b,
                 printf("loca_table_2b offsets is NULL\n");
                 return 0;
         }
-        if(num < 0 || num > loca_table_4b.offset_count){
+        if(num < 0 || (size_t)num >= loca_table_4b.offset_count){
                 printf("set loca table arry num error\n");
                 return 0;
         }
@@ -1287,15 +1287,6 @@ int loca_table_eazy_parse(
                                 return -1;
                         }
 
-                        loca_teble_parse_result =
-                                parse_2byte_loca_table(ttf_fd,
-                                        loca_table,
-                                        loca_table_data_wrapper->loca_table_2byte_format,
-                                        numGlyphs + 1);
-                                if(loca_teble_parse_result < 0){
-                                        printf("loca_teble_2byte_parse_result error");
-                                        return -1;
-                                }
                         break;
                 case 1:
                         loca_table_data_wrapper->loca_table_format_type = byte_4;
@@ -1314,16 +1305,6 @@ int loca_table_eazy_parse(
                                         loca_table_data_wrapper->loca_table_4byte_format,
                                         numGlyphs);
                                 
-                                if(loca_teble_parse_result < 0){
-                                        printf("loca_teble_4byte_parse_result error");
-                                        return -1;
-                                }
-                        loca_teble_parse_result =
-                                parse_4byte_loca_table(
-                                        ttf_fd,
-                                        loca_table,
-                                        loca_table_data_wrapper->loca_table_4byte_format,
-                                        numGlyphs+1);
                                 if(loca_teble_parse_result < 0){
                                         printf("loca_teble_4byte_parse_result error");
                                         return -1;
