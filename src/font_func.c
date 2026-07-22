@@ -1,5 +1,6 @@
 
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include<fcntl.h>
@@ -19,6 +20,8 @@
 #define CMAP_ENCODING_TYPE_COUNT 4
 
 #define format4_uint16_mem 6
+
+
 
 struct segment_data{
         int segment_num;
@@ -269,6 +272,32 @@ struct glyf_table{
         int16_t y_max;
 };
 
+struct loca_table_2byte_format{
+        /*
+         * locaから読み取った2バイト値の配列。
+         * 各値を2倍するとglyfテーブル先頭からの実際の相対位置になる。
+         */
+        uint16_t *offsets;
+        /*
+         * offsetsの要素数。ファイル内には保存されておらず、
+         * maxp.numGlyphs + 1から求める。
+         */
+        size_t offset_count;
+};
+
+struct loca_table_4byte_format{
+        /*
+         * locaから読み取った4バイト値の配列。
+         * 各値はglyfテーブル先頭からの実際の相対位置を直接表す。
+         */
+        uint32_t *offsets;
+        /*
+         * offsetsの要素数。ファイル内には保存されておらず、
+         * maxp.numGlyphs + 1から求める。
+         */
+        size_t offset_count;
+};
+
 
 /*すべてのテーブルは4バイト境界から開始する必要があり、テーブル間の残りのスペースはゼロで埋める必要があります。
 各テーブルの長さは、パディング後の長さではなく、実際のデータの長さでテーブルレコードに記録する必要があります。*/
@@ -313,12 +342,34 @@ static int read_exact(int fd, uint8_t *data, size_t size){
         }
         return 0;
 }
-uint16_t comb_ui8_2_ui16(const uint8_t high_byte,const uint8_t lower_byte);
-int input_f4_data(struct format4_data *f4_data,uint16_t data,int f4_mem_counter);
-int format4_data_parse(int ttf_fd,struct format4_data *f4_data);
+uint16_t comb_ui8_2_ui16(
+        const uint8_t high_byte,
+        const uint8_t lower_byte);
+
+
+int input_f4_data(
+        struct format4_data *f4_data,
+        uint16_t data,
+        int f4_mem_counter);
+
+int format4_data_parse(
+        int ttf_fd,
+        struct format4_data *f4_data);
+
+int parse_2byte_loca_table(
+        int ttf_fd,
+        struct table_record table_record,
+        struct loca_table_2byte_format *loca_table_2byte_format,
+        uint16_t numGlyph);
+
 struct cmap_format4_segment *found_input_chr_range(
         const struct format4_data *f4_data,uint16_t input_data);
 
+int parse_4byte_loca_table(
+        int ttf_fd,
+        struct table_record table_record,
+        struct loca_table_4byte_format *loca_table_4byte_format,
+        uint16_t numGlyph);
 
 //仮関数群////////////////
 uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd);
@@ -525,6 +576,48 @@ int main(){
                         goto cleanup;
         }
 
+        struct loca_table_2byte_format loca_2byte_f_table = {0};
+        struct loca_table_4byte_format loca_4byte_f_table = {0};
+
+        int loca_teble_parse_result;
+        switch(loca_data_format_type){
+                case 2:
+                        loca_teble_parse_result = 
+                                parse_2byte_loca_table(
+                                        ttf_font_fd,
+                                        *loca_table,
+                                        &loca_2byte_f_table,
+                                        numGlyphs);
+
+                        if(loca_teble_parse_result < 0){
+                                printf("loca_teble_2byte_parse_result error");
+                                goto cleanup;
+                        }
+                        break;
+                case 4:
+                        loca_teble_parse_result =
+                                parse_4byte_loca_table(
+                                        ttf_font_fd,
+                                        *loca_table,
+                                        &loca_4byte_f_table,
+                                        numGlyphs);
+                                
+                                if(loca_teble_parse_result < 0){
+                                        printf("loca_teble_4byte_parse_result error");
+                                        goto cleanup;
+                                }
+                        break;
+
+        }
+        
+        
+
+        if(loca_teble_parse_result < 0){
+                printf("2b format loca table can not parse\n");
+                goto cleanup;
+        }
+
+        printf("loca table parse sucsses\n");
         
         
 
@@ -1025,7 +1118,7 @@ uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd){
 }
 
 bool numGlyph_check(uint16_t numGlyphs,uint16_t Glyph_id){
-        if(numGlyphs < Glyph_id || numGlyphs <= 0) return false;
+        if(numGlyphs <= Glyph_id || numGlyphs <= 0) return false;
         return true;
 }
 int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd){
@@ -1036,4 +1129,87 @@ int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd){
         if(read_result != 0)return -1;
         int16_t i16_data = (int16_t)read_be16((uint8_t *)i8_data_strage);
         return i16_data;
+}
+
+int parse_2byte_loca_table(
+        int ttf_fd,
+        struct table_record table_record,
+        struct loca_table_2byte_format *loca_table_2byte_format,
+        uint16_t numGlyph){
+
+        if(loca_table_2byte_format == NULL)return -1;
+        if(lseek(ttf_fd,table_record.offcet,SEEK_SET) < 0){
+                printf("lseek error\n");
+                return -1;
+        }
+        
+        uint8_t ui8_data_storage[2] = {0}; 
+        size_t ui8_data_storage_size = sizeof(ui8_data_storage);
+        int allocate_size = numGlyph +1;
+        if(allocate_size != table_record.length){
+                printf("allocate_size and loca table length is not same\n");
+                return -1;
+        }
+
+        loca_table_2byte_format->offsets = malloc(sizeof(uint16_t) * allocate_size);
+        if(loca_table_2byte_format->offsets == NULL){
+                printf("loca_table_2byte_format offsets can not allocate\n");
+                return -1;
+        }
+        uint16_t *loca_offsets = loca_table_2byte_format->offsets;
+
+        for(int i = 0;i < allocate_size; i++){
+                if(read_exact(ttf_fd,ui8_data_storage,ui8_data_storage_size) != 0){
+                        printf("can not read locateble\n");
+                        free(loca_offsets);
+                        return -1;
+                }
+                uint16_t ui16_data = read_be16(ui8_data_storage);
+                loca_offsets[i] = ui16_data;
+        }
+
+        loca_table_2byte_format->offset_count = allocate_size;
+
+        return 0;
+}
+
+
+int parse_4byte_loca_table(
+        int ttf_fd,
+        struct table_record table_record,
+        struct loca_table_4byte_format *loca_table_4byte_format,
+        uint16_t numGlyph){
+                
+        if(loca_table_4byte_format == NULL)return -1;
+
+        if(lseek(ttf_fd,table_record.offcet,SEEK_SET) < 0){
+                printf("lseek error\n");
+                return -1;
+        }
+        
+        int allocate_size = numGlyph + 1;
+        if(allocate_size != table_record.length){
+                printf("allocate_size and loca table length is not same\n");
+                return -1;
+        }
+
+        loca_table_4byte_format->offsets = malloc(sizeof(uint32_t) * allocate_size);
+        if(loca_table_4byte_format->offsets == NULL){
+                printf("loca_table_4byte_format offset can not allocate\n");
+                return -1;
+        }
+        uint32_t *offsets = loca_table_4byte_format->offsets; 
+        for(int i = 0; i < allocate_size; i++){
+                uint8_t ui8_data_storage[4];
+                if(read_exact(ttf_fd,ui8_data_storage,sizeof(ui8_data_storage)) != 0){
+                        printf("can not read locateble(parse_4byte_loca_table func)\n");
+                        free(offsets);
+                        return -1;
+                }
+
+                uint32_t ui32_data = read_be32(ui8_data_storage);
+                offsets[i] = ui32_data;                
+        }
+        loca_table_4byte_format->offset_count = (size_t)allocate_size;
+        return 0;
 }
