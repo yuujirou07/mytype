@@ -390,6 +390,12 @@ int loca_table_eazy_parse(
 uint16_t get_2b_loca_arry_num_data(struct loca_table_2byte_format loca_table_2b,int num);
 uint32_t get_4b_loca_arry_num_data(struct loca_table_4byte_format loca_table_4b,int num);
 
+int get_glyph_loca_pos(
+        const struct loca_table_data_wrapper *loca_table_data_wrapp,
+        uint16_t glyph_id,
+        uint32_t *glyph_start_pos,
+        uint32_t *glyph_end_pos);
+
 //仮関数群////////////////
 uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd);
 int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd);
@@ -612,13 +618,43 @@ int main(){
                 goto cleanup;
         }
 
-        
+        uint32_t glyph_start_pos;
+        uint32_t glyph_end_pos;
 
-     
+        int get_glyph_loca_result = get_glyph_loca_pos(
+                &loca_table_data_wrapp,
+                glyph_id,
+                &glyph_start_pos,
+                &glyph_end_pos);
+
+        if(get_glyph_loca_result != 0){
+                printf("get glyph loca pos error\n");
+                goto cleanup;
+        }
+
+        printf("glyph start pos = %u, glyph end pos = %u\n",
+                glyph_start_pos,glyph_end_pos);
 
         
         
+        if(glyph_start_pos > glyph_end_pos){
+        printf("glyph position order error\n");
+                goto cleanup;
+        }
 
+        if(glyph_end_pos > glyf_tag_record->length){
+        printf("glyph position out of glyf table\n");
+        goto cleanup;
+        }
+
+        if(glyph_start_pos == glyph_end_pos){
+                printf("this glyph has no outline\n");
+                goto cleanup;
+        }
+        
+        
+        uint32_t glyph_file_pos =
+                glyf_tag_record->offcet + glyph_start_pos;
         
         
         
@@ -1253,6 +1289,40 @@ uint32_t get_4b_loca_arry_num_data(struct loca_table_4byte_format loca_table_4b,
         return loca_table_4b.offsets[num];
 }
 
+int get_glyph_loca_pos(
+        const struct loca_table_data_wrapper *loca_table_data_wrapp,
+        uint16_t glyph_id,
+        uint32_t *glyph_start_pos,
+        uint32_t *glyph_end_pos){
+
+        if(loca_table_data_wrapp == NULL || glyph_start_pos == NULL ||
+                glyph_end_pos == NULL)return -1;
+
+        if(loca_table_data_wrapp->loca_table_format_type == byte_4){
+                if(loca_table_data_wrapp->loca_table_4byte_format == NULL)return -1;
+
+                *glyph_start_pos = get_4b_loca_arry_num_data(
+                        *loca_table_data_wrapp->loca_table_4byte_format,
+                        glyph_id);
+                *glyph_end_pos = get_4b_loca_arry_num_data(
+                        *loca_table_data_wrapp->loca_table_4byte_format,
+                        glyph_id + 1);
+        }else if(loca_table_data_wrapp->loca_table_format_type == byte_2){
+                if(loca_table_data_wrapp->loca_table_2byte_format == NULL)return -1;
+
+                *glyph_start_pos = (uint32_t)get_2b_loca_arry_num_data(
+                        *loca_table_data_wrapp->loca_table_2byte_format,
+                        glyph_id) * 2;
+                *glyph_end_pos = (uint32_t)get_2b_loca_arry_num_data(
+                        *loca_table_data_wrapp->loca_table_2byte_format,
+                        glyph_id + 1) * 2;
+        }else{
+                return -1;
+        }
+
+        return 0;
+}
+
 int loca_table_eazy_parse(
         int ttf_fd,int indexToLocFormat,
         struct table_record loca_table,
@@ -1313,8 +1383,6 @@ int loca_table_eazy_parse(
                 default:
                         printf("this loca format is not support\n");
                         return -1;
-                
-
         }
 
         return 0;        
