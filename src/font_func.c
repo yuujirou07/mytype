@@ -1,4 +1,5 @@
 
+
 #include <stdint.h>
 #include <stdio.h>
 #include<fcntl.h>
@@ -56,7 +57,6 @@ enum support_format_type{
         format12 = 12,
         none = 0,
 };
-
 
 enum encode_type{
         unicode_encode,
@@ -127,8 +127,6 @@ struct format4_data{
         size_t glyph_id_count;
 };
 
-
-
 struct cmap_sub_table_data{
         int format_type;
 };
@@ -179,6 +177,99 @@ struct using_chr_encode_type{
         enum encode_type encode_type;
         uint16_t encode_num;
 };
+
+/*
+ * 以下の構造体は、解析したテーブルの値を保持するためのもの。
+ * 構造体のパディングとファイルのビッグエンディアン表現があるため、
+ * ファイルから構造体全体へ直接readせず、各メンバを個別に読み込む。
+ */
+struct maxp_table_data{
+        /* maxpのバージョン。TrueType輪郭では通常0x00010000。 */
+        uint32_t version;
+        /* フォントに含まれるグリフの総数。locaの要素数はこの値+1。 */
+        uint16_t num_glyphs;
+        /* Version 1.0専用。単純グリフ1個に含まれる最大点数。 */
+        uint16_t max_points;
+        /* 単純グリフ1個に含まれる最大輪郭数。 */
+        uint16_t max_contours;
+        /* 複合グリフ1個を展開したときの最大点数。 */
+        uint16_t max_composite_points;
+        /* 複合グリフ1個を展開したときの最大輪郭数。 */
+        uint16_t max_composite_contours;
+        /* TrueType命令で使用するゾーン数。通常は1または2。 */
+        uint16_t max_zones;
+        /* Twilight Zoneで使用する最大点数。 */
+        uint16_t max_twilight_points;
+        /* TrueType命令が使用するStorage Areaの最大要素数。 */
+        uint16_t max_storage;
+        /* fpgmテーブルで定義される関数の最大数。 */
+        uint16_t max_function_defs;
+        /* TrueType命令で定義される命令定義の最大数。 */
+        uint16_t max_instruction_defs;
+        /* TrueType命令実行時に必要なスタックの最大要素数。 */
+        uint16_t max_stack_elements;
+        /* 1グリフに格納されるヒンティング命令の最大バイト数。 */
+        uint16_t max_size_of_instructions;
+        /* 複合グリフが直接参照する部品グリフの最大数。 */
+        uint16_t max_component_elements;
+        /* 複合グリフ参照の最大階層数。 */
+        uint16_t max_component_depth;
+};
+
+struct head_table_data{
+        /* headテーブルのメジャーバージョン。通常は1。 */
+        uint16_t major_version;
+        /* headテーブルのマイナーバージョン。通常は0。 */
+        uint16_t minor_version;
+        /* フォント製作者が設定する16.16固定小数点形式の改訂番号。 */
+        int32_t font_revision;
+        /* フォント全体のチェックサムを調整する値。 */
+        uint32_t checksum_adjustment;
+        /* headテーブル確認用の固定値0x5F0F3CF5。 */
+        uint32_t magic_number;
+        /* ベースラインやヒンティング特性などを示すビットフラグ。 */
+        uint16_t flags;
+        /* 輪郭座標で1emを表すフォントデザイン単位数。 */
+        uint16_t units_per_em;
+        /* 1904年1月1日を基準とするフォント作成日時。 */
+        int64_t created;
+        /* 1904年1月1日を基準とする最終更新日時。 */
+        int64_t modified;
+        /* フォント内の全輪郭点における最小X座標。 */
+        int16_t x_min;
+        /* フォント内の全輪郭点における最小Y座標。 */
+        int16_t y_min;
+        /* フォント内の全輪郭点における最大X座標。 */
+        int16_t x_max;
+        /* フォント内の全輪郭点における最大Y座標。 */
+        int16_t y_max;
+        /* 太字、斜体、下線などのスタイルを示すビットフラグ。 */
+        uint16_t mac_style;
+        /* 読みやすさが保たれる最小の推奨ピクセルサイズ。 */
+        uint16_t lowest_rec_ppem;
+        /* 非推奨の文字方向ヒント。現在の仕様では通常2。 */
+        int16_t font_direction_hint;
+        /* locaの形式。0はuint16、1はuint32のオフセット配列。 */
+        int16_t index_to_loc_format;
+        /* glyfデータ形式。現在の仕様では0。 */
+        int16_t glyph_data_format;
+};
+
+/* glyfテーブル全体ではなく、各グリフ先頭の共通10バイトを保持する。 */
+struct glyf_table{
+        /* 0以上なら単純グリフの輪郭数、負数なら複合グリフ。 */
+        int16_t number_of_contours;
+        /* このグリフの全輪郭点における最小X座標。 */
+        int16_t x_min;
+        /* このグリフの全輪郭点における最小Y座標。 */
+        int16_t y_min;
+        /* このグリフの全輪郭点における最大X座標。 */
+        int16_t x_max;
+        /* このグリフの全輪郭点における最大Y座標。 */
+        int16_t y_max;
+};
+
+
 /*すべてのテーブルは4バイト境界から開始する必要があり、テーブル間の残りのスペースはゼロで埋める必要があります。
 各テーブルの長さは、パディング後の長さではなく、実際のデータの長さでテーブルレコードに記録する必要があります。*/
 
@@ -200,13 +291,11 @@ void set_cmap_encoding_record(int plat_form_id,int encoding_id,
         struct cmap_encoding_record_id_table *id_table,
          struct can_use_encoding_type *can_use_encoding_record,
          struct cmap_encoding_record **encoding_record);
-
 int  get_format_type(int ttf_fd,int *format_type);
-
 static uint16_t read_be16(const uint8_t data[2]){
         return ((uint16_t)data[0] << 8) | data[1];
 }
-
+struct table_record *found_tag_table(struct ttf_table_dir_data *dir_data,uint8_t tagname[tag_name_size]);
 static uint32_t read_be32(const uint8_t data[4]){
         return ((uint32_t)data[0] << 24) |
                ((uint32_t)data[1] << 16) |
@@ -231,11 +320,21 @@ struct cmap_format4_segment *found_input_chr_range(
         const struct format4_data *f4_data,uint16_t input_data);
 
 
+//仮関数群////////////////
+uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd);
+int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd);
+
+
+////////////////////
+
+bool numGlyph_check(uint16_t numGlyphs,uint16_t Glyph_id);
+
 int get_glyph_id(
         const struct format4_data *f4_data,
         const struct cmap_format4_segment *f4_seg_data,
         uint16_t *glyph_id);
 
+uint16_t parse_maxp_table(long offset,int ttf_fd);
 int main(){
         //osチェック
         enum os_type this_os = check_os();
@@ -263,7 +362,7 @@ int main(){
                 return 0;
         }
 
-
+        
         if(cmap_record_pos < 0)return 0;
         uint32_t cmap_offset = table_dir_data.tableRecords[table_num].offcet;//cmapテーブルオフセット
 
@@ -350,7 +449,8 @@ int main(){
         
         uint16_t chr = 'A';
       
-        struct cmap_format4_segment *segment_data = found_input_chr_range(f4_data,chr);
+        struct cmap_format4_segment *segment_data = 
+                found_input_chr_range(f4_data,chr);
         int main_result = 0;
         if(segment_data == NULL){
                 printf("character segment not found\n");
@@ -358,7 +458,7 @@ int main(){
                 goto cleanup;
         }
 
-        printf("range st = %u ed = %u segmentnum = %d ",segment_data->segment.start,
+        printf("range st = %u ed = %u segmentnum = %d\n",segment_data->segment.start,
                 segment_data->segment.end,segment_data->segment.segment_num);
 
         uint16_t glyph_id = 0;
@@ -368,6 +468,69 @@ int main(){
                 goto cleanup;
         }
         printf("glyph id = %u\n",glyph_id);
+
+        
+
+        struct table_record *loca_table  = found_tag_table(&table_dir_data,(uint8_t *)"loca");
+        struct table_record *head_table  = found_tag_table(&table_dir_data,(uint8_t *)"head");
+        struct table_record *maxp_table  = found_tag_table(&table_dir_data,(uint8_t *)"maxp");
+
+        bool cannot_allocate = false;
+        if(loca_table == NULL ){
+                printf("can not found loca table\n");
+                cannot_allocate = true;
+        }
+        if(head_table == NULL){
+                printf("can not found head table\n");
+                cannot_allocate = true;
+        }
+        if(maxp_table == NULL ){
+                printf("can not found maxp table\n");
+                cannot_allocate = true;
+        }
+        if(cannot_allocate){
+                goto cleanup;
+        }
+
+        uint16_t numGlyphs = get_maxp_table_numGlyphs_data(maxp_table->offcet,ttf_font_fd);
+        if(numGlyphs == 0){
+                printf("numGlyphs not found\n");
+                goto cleanup;
+        }
+        
+        bool is_numGlypg_ok = numGlyph_check(numGlyphs,glyph_id);
+        if(is_numGlypg_ok == false){
+                printf("numGlyph id error\n");
+                goto cleanup;
+        }
+        printf("numGlyph = %u\n",numGlyphs);
+        int16_t indexToLocFormat = 
+                get_head_table_indexToLocFormat(head_table->offcet,ttf_font_fd);
+        if(indexToLocFormat < 0){
+                printf("can not get indexToLocFormat\n");
+                goto cleanup;
+        }
+        printf("%d\n",indexToLocFormat);
+        
+        int loca_data_format_type;
+        switch(indexToLocFormat){
+                case 0:
+                        loca_data_format_type = 2;
+                        break;
+                case 1:
+                        loca_data_format_type = 4;
+                        break;
+                default:
+                        printf("loca format error\n");
+                        goto cleanup;
+        }
+
+        
+        
+
+        
+
+
 
         /*
          * 再開メモ（2026-07-22）: glyph IDからglyfデータの位置を求める。
@@ -834,4 +997,43 @@ int get_glyph_id(
 
         *glyph_id = (uint16_t)(glyph_value + f4_data->id_delta[segment_num]);
         return 0;
+}
+
+struct table_record *found_tag_table(struct ttf_table_dir_data *dir_data,uint8_t tagname[tag_name_size]){
+        if(dir_data == NULL || tagname == NULL) return NULL;
+
+        for(int i = 0;i < dir_data->numTables; i++){
+                if(memcmp(dir_data->tableRecords[i].tag,
+                        tagname,
+                        sizeof(uint8_t) * tag_name_size)  == 0){
+                        
+                        return &dir_data->tableRecords[i];
+                }
+        }
+        return NULL;
+}
+
+
+//仮関数
+uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd){
+        off_t result = lseek(ttf_fd,offset+4,SEEK_SET);
+        if(result <= 0)return 0;
+        uint8_t data_strage[2];
+        if(read_exact(ttf_fd,data_strage,sizeof(data_strage)) != 0)return 0;
+        uint16_t ui16_data = read_be16(data_strage);
+        return ui16_data;
+}
+
+bool numGlyph_check(uint16_t numGlyphs,uint16_t Glyph_id){
+        if(numGlyphs < Glyph_id || numGlyphs <= 0) return false;
+        return true;
+}
+int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd){
+        off_t result = lseek(ttf_fd,offset + 50,SEEK_SET);
+        if(result <= 0)return -1;
+        int8_t i8_data_strage[2];
+        int read_result = read_exact(ttf_fd,(uint8_t *)i8_data_strage,sizeof(i8_data_strage));
+        if(read_result != 0)return -1;
+        int16_t i16_data = (int16_t)read_be16((uint8_t *)i8_data_strage);
+        return i16_data;
 }
