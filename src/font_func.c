@@ -5,6 +5,7 @@
 #include<stdbool.h>
 #include<stdlib.h>
 #include <string.h>
+#include <raylib.h>
 #include"font_func_flags.h"
 
 #define table_dir_int_mem 5
@@ -19,6 +20,22 @@
 #define CMAP_ENCODING_TYPE_COUNT 4
 
 #define format4_uint16_mem 6
+
+
+struct point_pos{
+        int16_t pos_x;
+        int16_t pos_y;
+        uint8_t flags;
+};
+struct contour_pos_data{
+        struct point_pos *point_pos_data;
+        size_t point_pos_data_arry_size;
+};
+struct contour_data{
+        struct contour_pos_data *pos_data;
+        uint16_t pos_data_arry_size;//arry_num
+};
+
 
 struct segment_data{
         int segment_num;
@@ -421,10 +438,17 @@ int get_glyph_loca_pos(
         uint32_t *glyph_end_pos);
 
 int parse_glyph_data_table(long ttf_fd,uint32_t glyf_file_table_offset,struct glyf_table *glyf_table);
+int get_countour_data(struct glyf_table *glif_table,struct contour_data *contour_data);
+void free_countour_data(struct contour_data *contour_data);
+int show_glyph_with_raylib(
+        const struct contour_data *contour_data,
+        const struct glyf_table *glyf_table,
+        uint16_t units_per_em);
 
 //仮関数群////////////////
 uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd);
 int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd);
+uint16_t get_head_table_units_per_em(long offset,int ttf_fd);
 
 
 ////////////////////
@@ -610,11 +634,20 @@ int main(){
         printf("numGlyph = %u\n",numGlyphs);
         int16_t indexToLocFormat = 
                 get_head_table_indexToLocFormat(head_table->offcet,ttf_font_fd);
+        
         if(indexToLocFormat < 0){
                 printf("can not get indexToLocFormat\n");
                 goto cleanup;
         }
         printf("%d\n",indexToLocFormat);
+
+        uint16_t units_per_em =
+                get_head_table_units_per_em(head_table->offcet,ttf_font_fd);
+        if(units_per_em == 0){
+                printf("can not get unitsPerEm\n");
+                goto cleanup;
+        }
+        printf("unitsPerEm = %u\n",units_per_em);
 
 
         struct loca_table_data_wrapper loca_table_data_wrapp;
@@ -694,22 +727,20 @@ int main(){
         printf("glyf table parse sucsses\n");
         printf("glyf table num of count = %d\n",glyf_table.number_of_contours);
 
-        
+        struct contour_data contour_data = {0};
+        if(get_countour_data(&glyf_table,&contour_data) != 0){
+                printf("get countour data error\n");
+                main_result = 1;
+                goto glyf_cleanup;
+        }
 
-        
-
-        
-        
-        
-        
-        
-
-        
-
-
-
-        
-
+        if(show_glyph_with_raylib(
+                &contour_data,
+                &glyf_table,
+                units_per_em) != 0){
+                printf("show glyph error\n");
+                main_result = 1;
+        }
 
 
 
@@ -718,6 +749,34 @@ int main(){
 
         
 
+        
+
+        
+        
+        
+        
+        
+
+        
+
+
+
+        
+
+
+
+
+
+
+
+        
+
+glyf_cleanup:
+        free_countour_data(&contour_data);
+        free(glyf_table.end_pts_of_contours);
+        free(glyf_table.instructions);
+        free(glyf_table.flags);
+        free(glyf_table.points);
 
 cleanup:
         free(segment_data);
@@ -772,10 +831,7 @@ int load_ttf_table_dir_data(int ttf_fd){
         uint8_t table_record_data[16] ={0};
         int table_record_data_size = sizeof(table_record_data);
         int table_record_data_read_counter = 0;
-
-        long tag_offset = 0;
-        
-        
+                
         for(int i = 0; i < table_dir_data.numTables;i++){ 
                 readed_byte = read(ttf_fd,table_record_data,table_record_data_size);
                 if(readed_byte < table_record_data_size){
@@ -790,7 +846,6 @@ int load_ttf_table_dir_data(int ttf_fd){
                 memmove(&table_dir_data.tableRecords[i].tag,table_record_data,moved_size);
                 //タグ取得
                 offset_table_ctl(&now_file_pos,table_dir_data.tableRecords[i].tag,&i,TABLE_SET);
-                int move_size = sizeof(table_dir_data.tableRecords->checksum);
                 table_dir_data.tableRecords[i].checksum =
                         read_be32(table_record_data + 4);
 
@@ -838,13 +893,13 @@ long find_offset(char *tag){
 
 long offset_table_ctl(long *offset,uint8_t *tag,int *table_num,int flags){
         if((flags != TABLE_CREATE && tag == NULL) || 
-                (flags == TABLE_SET) && table_num == NULL)return -1;
+                ((flags == TABLE_SET) && table_num == NULL))return -1;
 
         static struct offset_tag_dic *offset_tag_dic = NULL;
         static int keeping_dic_count = 0;
 
         switch(flags){
-                case TABLE_SET:{
+                case TABLE_SET:
                         if(offset_tag_dic == NULL || keeping_dic_count < 0 ||
                                 keeping_dic_count >= table_dir_data.numTables ||
                                 offset_tag_dic == NULL || offset == NULL)return -1;
@@ -857,9 +912,8 @@ long offset_table_ctl(long *offset,uint8_t *tag,int *table_num,int flags){
                         offset_tag_dic[keeping_dic_count].table_num = *table_num;
                         keeping_dic_count++;
                         return 0;
-                }
-
-                case TABLE_GET:{
+                
+                case TABLE_GET:
                         if(offset_tag_dic == NULL)return -1;
                         for(int i = 0;i<keeping_dic_count;i++){
                                 if(memcmp(&offset_tag_dic[i].tag,tag,tag_name_size) == 0){
@@ -868,19 +922,20 @@ long offset_table_ctl(long *offset,uint8_t *tag,int *table_num,int flags){
                                         return offset_tag_dic[i].pos;
                                 }
                         }
-                }
-                case TABLE_CREATE:{
+                        return 0;
+                
+                case TABLE_CREATE:
                         if(offset_tag_dic != NULL)return -1;
                         offset_tag_dic = calloc(table_dir_data.numTables,
                                 sizeof(struct offset_tag_dic));
                         if(offset_tag_dic == NULL)exit(1);
                         return 0;
-                }
-                case TABLE_FREE:{
+
+                case TABLE_FREE:
                         if(offset_tag_dic == NULL)return -1;
                         free(offset_tag_dic);
                         return 0;
-                }
+                
         }
         return 0;
 }
@@ -1151,7 +1206,7 @@ int get_glyph_id(
 struct table_record *found_tag_table(struct ttf_table_dir_data *dir_data,uint8_t tagname[tag_name_size]){
         if(dir_data == NULL || tagname == NULL) return NULL;
 
-        for(int i = 0;i < dir_data->numTables; i++){
+        for(uint16_t i = 0;i < dir_data->numTables; i++){
                 if(memcmp(dir_data->tableRecords[i].tag,
                         tagname,
                         sizeof(uint8_t) * tag_name_size)  == 0){
@@ -1187,6 +1242,15 @@ int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd){
         return i16_data;
 }
 
+uint16_t get_head_table_units_per_em(long offset,int ttf_fd){
+        if(lseek(ttf_fd,offset + 18,SEEK_SET) < 0)return 0;
+
+        uint8_t data_storage[2];
+        if(read_exact(ttf_fd,data_storage,sizeof(data_storage)) != 0)return 0;
+
+        return read_be16(data_storage);
+}
+
 
 int parse_2byte_loca_table(
         int ttf_fd,
@@ -1205,7 +1269,7 @@ int parse_2byte_loca_table(
         int allocate_num = numGlyph +1;
         int allocate_size = allocate_num * sizeof(uint16_t);
 
-        if(allocate_size != table_record.length){
+        if((uint32_t)allocate_size != table_record.length){
                 printf("allocate_size and loca table length is not same\n");
                 return -1;
         }
@@ -1251,7 +1315,7 @@ int parse_4byte_loca_table(
         int allocate_num = numGlyph + 1;
         int allocate_size = allocate_num * sizeof(uint32_t);
 
-        if(allocate_size != table_record.length){
+        if((uint32_t)allocate_size != table_record.length){
                 printf("allocate_size and loca table length is not same\n");
                 return -1;
         }
@@ -1672,4 +1736,288 @@ error:
         glyf_table->point_count = 0;
         glyf_table->instruction_length = 0;
         return -1;
+}
+int get_countour_data(struct glyf_table *glif_table,struct contour_data *contour_data){
+        if(contour_data == NULL || glif_table == NULL
+                || contour_data->pos_data != NULL)return -1;
+
+        if(glif_table->number_of_contours < 0)return -1;
+        if(glif_table->number_of_contours == 0){
+                contour_data->pos_data_arry_size = 0;
+                return 0;
+        }
+
+        size_t contour_count = (size_t)glif_table->number_of_contours;
+
+        if(glif_table->end_pts_of_contours == NULL ||
+                glif_table->points == NULL ||
+                glif_table->end_pts_of_contours_count != contour_count){
+                return -1;
+        }
+
+        contour_data->pos_data = calloc(
+                contour_count,
+                sizeof(struct contour_pos_data));
+        if(contour_data->pos_data == NULL){
+                printf("contour_data->pos_data allocate error\n");
+                return -1;
+        }
+
+        size_t start_point_num = 0;
+        size_t allocated_contour_count = 0;
+
+        for(size_t i = 0;i < contour_count;i++){
+                size_t end_point_num = glif_table->end_pts_of_contours[i];
+
+                if(end_point_num < start_point_num ||
+                        end_point_num >= glif_table->point_count){
+                        printf("contour point range error\n");
+                        goto error;
+                }
+
+                size_t contour_point_count =
+                        end_point_num - start_point_num + 1;
+
+                contour_data->pos_data[i].point_pos_data = malloc(
+                        sizeof(struct point_pos) * contour_point_count);
+                if(contour_data->pos_data[i].point_pos_data == NULL){
+                        printf("point_pos_data allocate error\n");
+                        goto error;
+                }
+                contour_data->pos_data[i].point_pos_data_arry_size =
+                        contour_point_count;
+                allocated_contour_count++;
+
+                for(size_t j = 0;j < contour_point_count;j++){
+                        size_t point_num = start_point_num + j;
+
+                        contour_data->pos_data[i].point_pos_data[j].pos_x =
+                                glif_table->points[point_num].x_pos_data.x_cordinates;
+                        contour_data->pos_data[i].point_pos_data[j].pos_y =
+                                glif_table->points[point_num].y_pos_data.y_cordinates;
+                        contour_data->pos_data[i].point_pos_data[j].flags =
+                                glif_table->points[point_num].x_pos_data.flags;
+                }
+
+                start_point_num = end_point_num + 1;
+        }
+
+        contour_data->pos_data_arry_size = (uint16_t)contour_count;
+        return 0;
+
+error:
+        for(size_t i = 0;i < allocated_contour_count;i++){
+                free(contour_data->pos_data[i].point_pos_data);
+        }
+        free(contour_data->pos_data);
+        contour_data->pos_data = NULL;
+        contour_data->pos_data_arry_size = 0;
+        return -1;
+}
+
+void free_countour_data(struct contour_data *contour_data){
+        if(contour_data == NULL)return;
+
+        for(size_t i = 0;i < contour_data->pos_data_arry_size;i++){
+                free(contour_data->pos_data[i].point_pos_data);
+        }
+
+        free(contour_data->pos_data);
+        contour_data->pos_data = NULL;
+        contour_data->pos_data_arry_size = 0;
+}
+
+static Vector2 point_pos_to_screen(
+        const struct point_pos *point,
+        int16_t x_min,
+        int16_t y_max,
+        float scale,
+        float offset_x,
+        float offset_y){
+
+        Vector2 screen_point;
+        screen_point.x = offset_x + (point->pos_x - x_min) * scale;
+        screen_point.y = offset_y + (y_max - point->pos_y) * scale;
+        return screen_point;
+}
+
+static Vector2 get_middle_point(Vector2 point_a,Vector2 point_b){
+        Vector2 middle_point;
+        middle_point.x = (point_a.x + point_b.x) / 2.0f;
+        middle_point.y = (point_a.y + point_b.y) / 2.0f;
+        return middle_point;
+}
+
+static void draw_quadratic_curve(
+        Vector2 start_point,
+        Vector2 control_point,
+        Vector2 end_point){
+
+        const int split_count = 24;
+        Vector2 before_point = start_point;
+
+        for(int i = 1;i <= split_count;i++){
+                float t = (float)i / split_count;
+                float reverse_t = 1.0f - t;
+                Vector2 draw_point;
+
+                draw_point.x =
+                        reverse_t * reverse_t * start_point.x +
+                        2.0f * reverse_t * t * control_point.x +
+                        t * t * end_point.x;
+                draw_point.y =
+                        reverse_t * reverse_t * start_point.y +
+                        2.0f * reverse_t * t * control_point.y +
+                        t * t * end_point.y;
+
+                DrawLineEx(before_point,draw_point,3.0f,BLACK);
+                before_point = draw_point;
+        }
+}
+
+
+
+
+static void draw_one_countour(
+        const struct contour_pos_data *countour,
+        int16_t x_min,
+        int16_t y_max,
+        float scale,
+        float offset_x,
+        float offset_y){
+
+        if(countour == NULL || countour->point_pos_data == NULL ||
+                countour->point_pos_data_arry_size == 0)return;
+
+        size_t point_count = countour->point_pos_data_arry_size;
+        const struct point_pos *first_point = &countour->point_pos_data[0];
+        const struct point_pos *last_point =
+                &countour->point_pos_data[point_count - 1];
+
+        Vector2 start_point;
+        size_t point_num;
+
+        if(first_point->flags & ON_CURVE_POINT){
+                start_point = point_pos_to_screen(
+                        first_point,x_min,y_max,scale,offset_x,offset_y);
+                point_num = 1;
+        }else if(last_point->flags & ON_CURVE_POINT){
+                start_point = point_pos_to_screen(
+                        last_point,x_min,y_max,scale,offset_x,offset_y);
+                point_num = 0;
+        }else{
+                Vector2 first_screen_point = point_pos_to_screen(
+                        first_point,x_min,y_max,scale,offset_x,offset_y);
+                Vector2 last_screen_point = point_pos_to_screen(
+                        last_point,x_min,y_max,scale,offset_x,offset_y);
+                start_point = get_middle_point(
+                        first_screen_point,last_screen_point);
+                point_num = 0;
+        }
+
+        Vector2 current_point = start_point;
+
+        while(point_num < point_count){
+                const struct point_pos *point =
+                        &countour->point_pos_data[point_num];
+                Vector2 screen_point = point_pos_to_screen(
+                        point,x_min,y_max,scale,offset_x,offset_y);
+
+                if(point->flags & ON_CURVE_POINT){
+                        DrawLineEx(current_point,screen_point,3.0f,BLACK);
+                        current_point = screen_point;
+                        point_num++;
+                        continue;
+                }
+
+                if(point_num + 1 < point_count){
+                        const struct point_pos *next_point =
+                                &countour->point_pos_data[point_num + 1];
+                        Vector2 next_screen_point = point_pos_to_screen(
+                                next_point,x_min,y_max,scale,offset_x,offset_y);
+
+                        if(next_point->flags & ON_CURVE_POINT){
+                                draw_quadratic_curve(
+                                        current_point,
+                                        screen_point,
+                                        next_screen_point);
+                                current_point = next_screen_point;
+                                point_num += 2;
+                        }else{
+                                Vector2 middle_point = get_middle_point(
+                                        screen_point,next_screen_point);
+                                draw_quadratic_curve(
+                                        current_point,
+                                        screen_point,
+                                        middle_point);
+                                current_point = middle_point;
+                                point_num++;
+                        }
+                }else{
+                        draw_quadratic_curve(
+                                current_point,
+                                screen_point,
+                                start_point);
+                        current_point = start_point;
+                        point_num++;
+                }
+        }
+
+        DrawLineEx(current_point,start_point,3.0f,BLACK);
+}
+
+int show_glyph_with_raylib(
+        const struct contour_data *contour_data,
+        const struct glyf_table *glyf_table,
+        uint16_t units_per_em){
+
+        if(contour_data == NULL || contour_data->pos_data == NULL ||
+                glyf_table == NULL || units_per_em == 0)return -1;
+
+        const int screen_width = 900;
+        const int screen_height = 900;
+        const float font_pixel_size = 650.0f;
+        float scale = font_pixel_size / units_per_em;
+        float glyph_width = (glyf_table->x_max - glyf_table->x_min) * scale;
+        float glyph_height = (glyf_table->y_max - glyf_table->y_min) * scale;
+        float offset_x = (screen_width - glyph_width) / 2.0f;
+        float offset_y = (screen_height - glyph_height) / 2.0f;
+
+        InitWindow(screen_width,screen_height,"mytype - glyph A");
+        if(!IsWindowReady()){
+                printf("raylib window create error\n");
+                return -1;
+        }
+
+        SetTargetFPS(60);
+        bool screenshot_saved = false;
+        int draw_frame_count = 0;
+
+        while(!WindowShouldClose()){
+                BeginDrawing();
+                ClearBackground(RAYWHITE);
+
+                for(size_t i = 0;i < contour_data->pos_data_arry_size;i++){
+                        draw_one_countour(
+                                &contour_data->pos_data[i],
+                                glyf_table->x_min,
+                                glyf_table->y_max,
+                                scale,
+                                offset_x,
+                                offset_y);
+                }
+
+                DrawText("A - TrueType outline",20,20,24,DARKGRAY);
+                DrawText("ESC: close",20,52,18,GRAY);
+                EndDrawing();
+
+                draw_frame_count++;
+                if(!screenshot_saved && draw_frame_count >= 2){
+                        TakeScreenshot("A_outline.png");
+                        screenshot_saved = true;
+                }
+        }
+
+        CloseWindow();
+        return 0;
 }
