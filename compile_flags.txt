@@ -1,0 +1,4 @@
+--target=x86_64-w64-windows-gnu
+-IC:/msys64/mingw64/include
+-IC:/msys64/mingw64/include/freetype2
+-Iinclude

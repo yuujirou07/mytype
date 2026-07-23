@@ -1,5 +1,3 @@
-
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -7,6 +5,7 @@
 #include<stdbool.h>
 #include<stdlib.h>
 #include <string.h>
+#include"font_func_flags.h"
 
 #define table_dir_int_mem 5
 //ttf_table_dir_data内のメンバの最大容量(uint8_tの必要個数)
@@ -256,7 +255,19 @@ struct head_table_data{
         int16_t glyph_data_format;
 };
 
-/* glyfテーブル全体ではなく、各グリフ先頭の共通10バイトを保持する。 */
+struct point_data{
+        struct {
+                int16_t x_cordinates;
+                uint8_t flags;
+        }x_pos_data;
+
+        struct {
+                int16_t y_cordinates;
+                uint8_t flags;
+        }y_pos_data;
+};
+
+/* 1つのグリフの共通ヘッダーと単純グリフデータを保持する。 */
 struct glyf_table{
         /* 0以上なら単純グリフの輪郭数、負数なら複合グリフ。 */
         int16_t number_of_contours;
@@ -268,6 +279,19 @@ struct glyf_table{
         int16_t x_max;
         /* このグリフの全輪郭点における最大Y座標。 */
         int16_t y_max;
+        /* 各輪郭の最後の点番号。要素数はnumber_of_contours。 */
+        uint16_t *end_pts_of_contours;
+        size_t end_pts_of_contours_count;
+        /* グリフ命令のバイト数と命令データ。 */
+        uint16_t instruction_length;
+        uint8_t *instructions;
+        /* 全輪郭に含まれる点の総数。 */
+        size_t point_count;
+        /* REPEAT_FLAGを展開した、各点に対応するフラグ。 */
+        uint8_t *flags;
+        size_t flags_count;
+        /* 差分値から復元した各点のX座標とY座標。 */
+        struct point_data *points;
 };
 
 struct loca_table_2byte_format{
@@ -658,21 +682,17 @@ int main(){
         uint32_t glyph_file_pos =
                 glyf_tag_record->offcet + glyph_start_pos;
 
-
-
-        struct glyf_table glyf_table;
+        struct glyf_table glyf_table = {0};
         int glyf_parse_result = 
                 parse_glyph_data_table(ttf_font_fd,glyph_file_pos,&glyf_table);
 
         if(glyf_parse_result != 0){
                 printf("glyf table parse error\n");
-                return 0;
+                main_result = 1;
+                goto cleanup;
         }
         printf("glyf table parse sucsses\n");
         printf("glyf table num of count = %d\n",glyf_table.number_of_contours);
-
-
-
 
         
 
@@ -1407,6 +1427,12 @@ int parse_glyph_data_table(long ttf_fd,uint32_t glyf_file_table_offset,struct gl
         int16_t i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage);
         glyf_table->number_of_contours = i16_data;
 
+
+        if(glyf_table->number_of_contours < 0 ){
+                printf("this font shape is not support\n");
+                return -1;
+        }
+
         i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage + 2);
         glyf_table->x_min = i16_data;
 
@@ -1419,5 +1445,231 @@ int parse_glyph_data_table(long ttf_fd,uint32_t glyf_file_table_offset,struct gl
         i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage + 8);
         glyf_table->y_max = i16_data;
 
+
+        uint8_t ui8_2byte_data_storage[2];
+        if(glyf_table->number_of_contours > 0){
+                uint16_t end_pos_countor = glyf_table->number_of_contours;
+                glyf_table->end_pts_of_contours = malloc(sizeof(uint16_t) * end_pos_countor);
+                if(glyf_table->end_pts_of_contours == NULL){
+                        printf("glyf_table->end_pts_of_contours allocate error\n");
+                        goto error;
+                }
+
+                uint16_t check_point_num_data = 0;
+                for(int i = 0;i < end_pos_countor;i++){
+
+                        if(read_exact(ttf_fd,ui8_2byte_data_storage,sizeof(ui8_2byte_data_storage)) != 0){
+                                printf("glyf_table->end_pts_of_contours read error\n");
+                                goto error;
+                        }
+
+                        uint16_t ui16_data = read_be16(ui8_2byte_data_storage);
+
+                        if(i == 0){
+                                check_point_num_data = ui16_data;
+                        }
+                        else if(check_point_num_data >= ui16_data){
+                                printf("this point arry is not ascending order\n");
+                                goto error;
+                        }
+                        else{
+                                check_point_num_data = ui16_data;
+                        }
+
+                        glyf_table->end_pts_of_contours[i] = ui16_data;
+
+                }
+                glyf_table->point_count =  glyf_table->end_pts_of_contours[end_pos_countor-1] + 1;
+                printf("point coun t = %zu\n",glyf_table->point_count);
+                glyf_table->end_pts_of_contours_count = end_pos_countor;
+        }
+
+
+
+        if(read_exact(ttf_fd,ui8_2byte_data_storage,sizeof(ui8_2byte_data_storage)) != 0){
+                printf("glyf_table->instruction_length data can not read\n");
+                goto error;
+        }
+
+        uint16_t instruction_length = read_be16(ui8_2byte_data_storage);
+        glyf_table->instruction_length = instruction_length;
+        if(instruction_length > 0){
+                glyf_table->instructions = malloc(instruction_length);
+                if(glyf_table->instructions == NULL){
+                        printf("glyf_table->instructions allocate error\n");
+                        goto error;
+                }
+
+                for(int i=0;i < instruction_length;i++){
+                        uint8_t ui8_data_storage;
+                        if(read_exact(ttf_fd,&ui8_data_storage,sizeof(ui8_data_storage)) != 0){
+                                printf("instruction_length can not read\n");
+                                goto error;
+                        }
+
+                        glyf_table->instructions[i] = ui8_data_storage;
+                }
+        }
+
+
+        if(glyf_table->point_count == 0)return 0;
+
+        glyf_table->flags = malloc(sizeof(uint8_t) * glyf_table->point_count);
+        if(glyf_table->flags == NULL){
+                printf("glyf_table->flags can not allocate\n");
+                goto error;
+        }
+
+        size_t point_flags_read_count = 0;
+        while(point_flags_read_count < glyf_table->point_count){
+                uint8_t ui8_data;
+                if(read_exact(ttf_fd,&ui8_data,sizeof(ui8_data)) != 0){
+                        printf("point flags can not read\n");
+                        goto error;
+                }
+
+                if(ui8_data & REPEAT_FLAG){
+                        uint8_t nex_arry_mem_data;
+                        if(read_exact(ttf_fd,&nex_arry_mem_data,sizeof(nex_arry_mem_data)) != 0){
+                                printf("point flags read error\n");
+                                goto error;
+                        }
+                        glyf_table->flags[point_flags_read_count] = ui8_data;
+                        point_flags_read_count++;
+
+                        if((size_t)nex_arry_mem_data >
+                                glyf_table->point_count - point_flags_read_count){
+                                printf("point flags repeat count error\n");
+                                goto error;
+                        }
+
+                        for(int i = 0;i < nex_arry_mem_data;i++){
+                                glyf_table->flags[point_flags_read_count] = ui8_data;
+                                point_flags_read_count++;
+                        }
+
+                }else{
+                        glyf_table->flags[point_flags_read_count] = ui8_data;
+                        point_flags_read_count++;
+                }
+        }
+
+        glyf_table->flags_count = glyf_table->point_count;
+        glyf_table->points = calloc(
+                glyf_table->point_count,
+                sizeof(struct point_data));
+
+        if(glyf_table->points == NULL){
+                printf("glyf_table->points allocate error\n");
+                goto error;
+        }
+
+        uint8_t *flags = glyf_table->flags;
+        int32_t current_x = 0;
+
+        for(size_t i = 0;i < glyf_table->point_count;i++){
+                uint8_t flag = flags[i];
+                int32_t move_x = 0;
+
+                glyf_table->points[i].x_pos_data.flags = flag;
+                glyf_table->points[i].y_pos_data.flags = flag;
+
+                if(flag & X_SHORT_VECTOR){
+                        uint8_t x_data_storage;
+                        if(read_exact(
+                                ttf_fd,
+                                &x_data_storage,
+                                sizeof(x_data_storage)) != 0){
+                                printf("x short vector read error\n");
+                                goto error;
+                        }
+
+                        move_x = x_data_storage;
+                        if((flag & X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR) == 0){
+                                move_x = -move_x;
+                        }
+                }else if((flag & X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR) == 0){
+                        uint8_t x_data_storage[2];
+                        if(read_exact(
+                                ttf_fd,
+                                x_data_storage,
+                                sizeof(x_data_storage)) != 0){
+                                printf("x coordinate read error\n");
+                                goto error;
+                        }
+
+                        move_x = (int16_t)read_be16(x_data_storage);
+                }
+
+                current_x += move_x;
+                if(current_x < INT16_MIN || current_x > INT16_MAX){
+                        printf("x coordinate range error\n");
+                        goto error;
+                }
+
+                glyf_table->points[i].x_pos_data.x_cordinates =
+                        (int16_t)current_x;
+        }
+
+        int32_t current_y = 0;
+
+        for(size_t i = 0;i < glyf_table->point_count;i++){
+                uint8_t flag = flags[i];
+                int32_t move_y = 0;
+
+                if(flag & Y_SHORT_VECTOR){
+                        uint8_t y_data_storage;
+                        if(read_exact(
+                                ttf_fd,
+                                &y_data_storage,
+                                sizeof(y_data_storage)) != 0){
+                                printf("y short vector read error\n");
+                                goto error;
+                        }
+
+                        move_y = y_data_storage;
+                        if((flag & Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR) == 0){
+                                move_y = -move_y;
+                        }
+                }else if((flag & Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR) == 0){
+                        uint8_t y_data_storage[2];
+                        if(read_exact(
+                                ttf_fd,
+                                y_data_storage,
+                                sizeof(y_data_storage)) != 0){
+                                printf("y coordinate read error\n");
+                                goto error;
+                        }
+
+                        move_y = (int16_t)read_be16(y_data_storage);
+                }
+
+                current_y += move_y;
+                if(current_y < INT16_MIN || current_y > INT16_MAX){
+                        printf("y coordinate range error\n");
+                        goto error;
+                }
+
+                glyf_table->points[i].y_pos_data.y_cordinates =
+                        (int16_t)current_y;
+        }
+
+
+
         return 0;
+
+error:
+        free(glyf_table->end_pts_of_contours);
+        glyf_table->end_pts_of_contours = NULL;
+        glyf_table->end_pts_of_contours_count = 0;
+        free(glyf_table->instructions);
+        glyf_table->instructions = NULL;
+        free(glyf_table->flags);
+        glyf_table->flags = NULL;
+        glyf_table->flags_count = 0;
+        free(glyf_table->points);
+        glyf_table->points = NULL;
+        glyf_table->point_count = 0;
+        glyf_table->instruction_length = 0;
+        return -1;
 }
