@@ -396,7 +396,7 @@ int get_glyph_loca_pos(
         uint32_t *glyph_start_pos,
         uint32_t *glyph_end_pos);
 
-int parse_glyph_data_table(long ttf_fd,uint16_t glyf_file_table_offset,struct glyf_table *glyf_table);
+int parse_glyph_data_table(long ttf_fd,uint32_t glyf_file_table_offset,struct glyf_table *glyf_table);
 
 //仮関数群////////////////
 uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd);
@@ -670,6 +670,9 @@ int main(){
         }
         printf("glyf table parse sucsses\n");
         printf("glyf table num of count = %d\n",glyf_table.number_of_contours);
+
+
+
 
         
 
@@ -1384,7 +1387,7 @@ int loca_table_eazy_parse(
 }
 
 
-int parse_glyph_data_table(long ttf_fd,uint16_t glyf_file_table_offset,struct glyf_table *glyf_table){
+int parse_glyph_data_table(long ttf_fd,uint32_t glyf_file_table_offset,struct glyf_table *glyf_table){
         if(glyf_table == NULL){
                 printf("glyf table is  NULL\n");
                 return -1;
