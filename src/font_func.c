@@ -396,6 +396,8 @@ int get_glyph_loca_pos(
         uint32_t *glyph_start_pos,
         uint32_t *glyph_end_pos);
 
+int parse_glyph_data_table(long ttf_fd,uint16_t glyf_file_table_offset,struct glyf_table *glyf_table);
+
 //仮関数群////////////////
 uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd);
 int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd);
@@ -655,42 +657,35 @@ int main(){
         
         uint32_t glyph_file_pos =
                 glyf_tag_record->offcet + glyph_start_pos;
-        
-        
-        
+
+
+
+        struct glyf_table glyf_table;
+        int glyf_parse_result = 
+                parse_glyph_data_table(ttf_font_fd,glyph_file_pos,&glyf_table);
+
+        if(glyf_parse_result != 0){
+                printf("glyf table parse error\n");
+                return 0;
+        }
+        printf("glyf table parse sucsses\n");
+        printf("glyf table num of count = %d\n",glyf_table.number_of_contours);
 
         
 
-
-
-        /*
-         * 再開メモ（2026-07-22）: glyph IDからglyfデータの位置を求める。
-         *
-         * 1. Table Directoryから"head"、"loca"、"glyf"、"maxp"を探し、
-         *    各テーブルのoffsetとlengthを取得する。
-         * 2. maxp.numGlyphsを読み、glyph_idがnumGlyphs未満か確認する。
-         * 3. headテーブル先頭から50バイト目のindexToLocFormatを読む。
-         *    indexToLocFormat == 0: locaはuint16_t配列（Short形式）。
-         *    indexToLocFormat == 1: locaはuint32_t配列（Long形式）。
-         * 4. loca[glyph_id]とloca[glyph_id + 1]をビッグエンディアンで読む。
-         *    Short形式では、読み取った各値を2倍してglyf内相対offsetにする。
-         *    Long形式では、読み取った値をそのまま相対offsetとして使う。
-         * 5. glyph開始位置 = glyf_offset + loca[glyph_id]、
-         *    glyph終了位置 = glyf_offset + loca[glyph_id + 1]として計算する。
-         * 6. 開始位置 <= 終了位置、終了相対offset <= glyf.lengthを確認する。
-         *    開始位置 == 終了位置なら輪郭を持たないglyphとして扱う。
-         * 7. glyph開始位置へ移動し、glyfヘッダーの10バイトを読む。
-         *    numberOfContours、xMin、yMin、xMax、yMaxはint16_tとして扱う。
-         *    numberOfContours >= 0なら単純glyph、負数なら複合glyphを解析する。
-         * 8. read_exactとlseekの戻り値を毎回確認し、途中失敗時も確保済み
-         *    メモリとファイルディスクリプタを解放できるようにする。
-         */
-      
+        
 
         
         
+        
+        
+        
+
+        
 
 
+
+        
 
 
 
@@ -1386,4 +1381,40 @@ int loca_table_eazy_parse(
         }
 
         return 0;        
+}
+
+
+int parse_glyph_data_table(long ttf_fd,uint16_t glyf_file_table_offset,struct glyf_table *glyf_table){
+        if(glyf_table == NULL){
+                printf("glyf table is  NULL\n");
+                return -1;
+        }
+
+        if(lseek(ttf_fd,glyf_file_table_offset,SEEK_SET) < 0){
+                printf("glyf table lseek error\n");
+                return -1;
+        }
+
+        int8_t ui8_data_storage[10];
+        if(read_exact(ttf_fd,(uint8_t *)ui8_data_storage,sizeof(ui8_data_storage)) != 0){
+                printf("glyf table parse error\n");
+                return -1;
+        }
+
+        int16_t i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage);
+        glyf_table->number_of_contours = i16_data;
+
+        i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage + 2);
+        glyf_table->x_min = i16_data;
+
+        i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage + 4);
+        glyf_table->y_min = i16_data;
+
+        i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage + 6);
+        glyf_table->x_max = i16_data;
+
+        i16_data = (int16_t)read_be16((uint8_t *)ui8_data_storage + 8);
+        glyf_table->y_max = i16_data;
+
+        return 0;
 }
