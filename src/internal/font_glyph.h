@@ -47,10 +47,16 @@ struct glyf_table{
         struct point_data *points;
 };
 
-struct chr_glyf_dic_table{
-        struct glyf_table *glif_table;
-        struct contour_data *contour_data;
-        uint16_t chr;
+/* Unicode と、その文字を描画するためのグリフデータを一体で所有する。 */
+struct character_render_data{
+        uint32_t unicode_codepoint;
+        uint16_t glyph_id;
+        uint16_t units_per_em;
+        int16_t x_min;
+        int16_t y_min;
+        int16_t x_max;
+        int16_t y_max;
+        struct contour_data contours;
 };
 
 int parse_glyph_data_table(

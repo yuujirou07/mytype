@@ -14,10 +14,13 @@ int main(int argc,char **argv){
         const char *font_path = argc > 1
                 ? argv[1]
                 : "font_file/IBMPlexSansJP-Thin.ttf";
+
+        int key = 'i';
+
         uint32_t codepoint = argc > 2
                 ? (uint32_t)strtoul(argv[2],NULL,0)
-                : (uint32_t)'A';
-                
+                : (uint32_t)key;
+
         int show_window = !(argc > 3 && strcmp(argv[3],"--no-window") == 0);
 
         myfont_font *font = NULL;
@@ -49,7 +52,9 @@ int main(int argc,char **argv){
                 total_points += myfont_glyph_point_count(glyph,i);
         }
 
-        printf("codepoint: U+%04X\n",(unsigned int)codepoint);
+        printf(
+                "codepoint: U+%04X\n",
+                (unsigned int)myfont_glyph_codepoint(glyph));
         printf("glyph ID: %u\n",myfont_glyph_id(glyph));
         printf("units per em: %u\n",myfont_units_per_em(font));
         printf("bounds: (%d, %d) - (%d, %d)\n",x_min,y_min,x_max,y_max);

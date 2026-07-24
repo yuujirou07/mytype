@@ -32,11 +32,17 @@ myfont_result myfont_load_glyph(
         myfont_font *font,
         uint32_t codepoint,
         myfont_glyph **out_glyph);
+myfont_result myfont_glyph_set_codepoint(
+        myfont_font *font,
+        myfont_glyph *glyph,
+        uint32_t codepoint);
 void myfont_glyph_destroy(myfont_glyph *glyph);
 
 /* 内部配列を公開せず、必要な値だけ取得する。 */
 uint16_t myfont_units_per_em(const myfont_font *font);
+uint32_t myfont_glyph_codepoint(const myfont_glyph *glyph);
 uint16_t myfont_glyph_id(const myfont_glyph *glyph);
+size_t myfont_glyph_cached_count(const myfont_glyph *glyph);
 size_t myfont_glyph_contour_count(const myfont_glyph *glyph);
 size_t myfont_glyph_point_count(
         const myfont_glyph *glyph,
@@ -57,8 +63,8 @@ myfont_result myfont_glyph_get_point(
 
 /* 既存のRaylib描画を不透明ハンドル経由で利用する。 */
 myfont_result myfont_show_glyph(
-        const myfont_font *font,
-        const myfont_glyph *glyph);
+        myfont_font *font,
+        myfont_glyph *glyph);
 
 const char *myfont_result_string(myfont_result result);
 

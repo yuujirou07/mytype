@@ -1,12 +1,14 @@
-#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include<string.h>
 
+#include "font_glyph.h"
 #include "raylib.h"
 
 #include "font_func_flags.h"
 #include "font_render.h"
-
+static bool key_pressed = false;
 static Vector2 point_pos_to_screen(
         const struct point_pos *point,
         int16_t x_min,
@@ -146,58 +148,91 @@ static void draw_one_countour(
         DrawLineEx(current_point,start_point,3.0f,BLACK);
 }
 
-int show_glyph_with_raylib(
-        const struct contour_data *contour_data,
-        const struct glyf_table *glyf_table,
-        uint16_t units_per_em){
+int glyph_window_open(void){
+        const int screen_width = 900;
+        const int screen_height = 900;
+        InitWindow(screen_width,screen_height,"mytype - glyph viewer");
+        if(!IsWindowReady())return -1;
+        SetTargetFPS(0);
+        return 0;
+}
 
-        if(contour_data == NULL || contour_data->pos_data == NULL ||
-                glyf_table == NULL || units_per_em == 0)return -1;
+int glyph_window_should_close(void){
+        return !IsWindowReady() || WindowShouldClose();
+}
+
+uint32_t glyph_window_next_codepoint(void){
+        int codepoint = GetCharPressed();
+        if(codepoint > 0)key_pressed = true;
+        return codepoint > 0 ? (uint32_t)codepoint : 0;
+}
+
+void glyph_window_draw(
+        const struct character_render_data *character,
+        const char *input_status){
+
+        if(character == NULL || character->units_per_em == 0)return;
 
         const int screen_width = 900;
         const int screen_height = 900;
         const float font_pixel_size = 650.0f;
-        float scale = font_pixel_size / units_per_em;
-        float glyph_width = (glyf_table->x_max - glyf_table->x_min) * scale;
-        float glyph_height = (glyf_table->y_max - glyf_table->y_min) * scale;
+        float scale = font_pixel_size / character->units_per_em;
+        float glyph_width = (character->x_max - character->x_min) * scale;
+        float glyph_height = (character->y_max - character->y_min) * scale;
         float offset_x = (screen_width - glyph_width) / 2.0f;
         float offset_y = (screen_height - glyph_height) / 2.0f;
+        
 
-        InitWindow(screen_width,screen_height,"mytype - glyph A");
-        if(!IsWindowReady()){
-                printf("raylib window create error\n");
-                return -1;
+        static uint32_t chr ={0};
+
+
+        double st_t = 0;
+        if(key_pressed == true){
+                st_t = GetTime();
+        }
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+
+        for(size_t i = 0;i < character->contours.pos_data_arry_size;i++){
+                draw_one_countour(
+                        &character->contours.pos_data[i],
+                        character->x_min,
+                        character->y_max,
+                        scale,
+                        offset_x,
+                        offset_y);
         }
 
-        SetTargetFPS(60);
-        bool screenshot_saved = false;
-        int draw_frame_count = 0;
-
-        while(!WindowShouldClose()){
-                BeginDrawing();
-                ClearBackground(RAYWHITE);
-
-                for(size_t i = 0;i < contour_data->pos_data_arry_size;i++){
-                        draw_one_countour(
-                                &contour_data->pos_data[i],
-                                glyf_table->x_min,
-                                glyf_table->y_max,
-                                scale,
-                                offset_x,
-                                offset_y);
-                }
-
-                DrawText("A - TrueType outline",20,20,24,DARKGRAY);
-                DrawText("ESC: close",20,52,18,GRAY);
-                EndDrawing();
-
-                draw_frame_count++;
-                if(!screenshot_saved && draw_frame_count >= 2){
-                        TakeScreenshot("A_outline.png");
-                        screenshot_saved = true;
-                }
+        char glyph_label[80];
+        (void)snprintf(
+                glyph_label,
+                sizeof(glyph_label),
+                "U+%04X / glyph %u",
+                (unsigned int)character->unicode_codepoint,
+                character->glyph_id);
+        DrawText(glyph_label,20,20,24,DARKGRAY);
+        DrawText("Type a character: change glyph",20,52,18,GRAY);
+        DrawText("ESC: close",20,76,18,GRAY);
+        if(input_status != NULL){
+                char status_label[160];
+                (void)snprintf(
+                        status_label,
+                        sizeof(status_label),
+                        "Input ignored: %s",
+                        input_status);
+                DrawText(status_label,20,104,18,RED);
         }
+        EndDrawing();
 
+        if(st_t != 0){
+                double ed_t = GetTime();
+                printf("key[%c] draw_time = %f\n",character->unicode_codepoint,ed_t - st_t);
+                key_pressed = false;
+        }
+        memcpy(&chr,&character->unicode_codepoint,sizeof(chr));
+}
+
+void glyph_window_close(void){
+        if(!IsWindowReady())return;
         CloseWindow();
-        return 0;
 }

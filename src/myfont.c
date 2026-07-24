@@ -24,10 +24,46 @@ struct myfont_font{
 };
 
 struct myfont_glyph{
-        uint16_t glyph_id;
-        struct glyf_table glyf;
-        struct contour_data contours;
+        struct character_render_data *cache;
+        size_t cache_count;
+        size_t cache_capacity;
+        size_t current_index;
 };
+
+static struct character_render_data *current_character(
+        myfont_glyph *glyph){
+
+        if(glyph == NULL || glyph->cache == NULL ||
+                glyph->current_index >= glyph->cache_count)return NULL;
+        return &glyph->cache[glyph->current_index];
+}
+
+static const struct character_render_data *current_character_const(
+        const myfont_glyph *glyph){
+
+        if(glyph == NULL || glyph->cache == NULL ||
+                glyph->current_index >= glyph->cache_count)return NULL;
+        return &glyph->cache[glyph->current_index];
+}
+
+static void free_character_render_data(
+        struct character_render_data *character){
+
+        if(character == NULL)return;
+
+        free_countour_data(&character->contours);
+        memset(character,0,sizeof(*character));
+}
+
+static void free_parsed_glyph(struct glyf_table *glyph_outline){
+        if(glyph_outline == NULL)return;
+
+        free(glyph_outline->end_pts_of_contours);
+        free(glyph_outline->instructions);
+        free(glyph_outline->flags);
+        free(glyph_outline->points);
+        memset(glyph_outline,0,sizeof(*glyph_outline));
+}
 
 static void free_format4(struct format4_data *format4){
         if(format4 == NULL)return;
@@ -312,7 +348,24 @@ myfont_result myfont_load_glyph(
 
         myfont_glyph *glyph = calloc(1,sizeof(*glyph));
         if(glyph == NULL)return MYFONT_ERROR_ALLOCATION;
-        glyph->glyph_id = glyph_id;
+
+        glyph->cache_capacity = 4;
+        glyph->cache = calloc(
+                glyph->cache_capacity,
+                sizeof(*glyph->cache));
+        if(glyph->cache == NULL){
+                myfont_glyph_destroy(glyph);
+                return MYFONT_ERROR_ALLOCATION;
+        }
+        glyph->cache_count = 1;
+        glyph->current_index = 0;
+
+        struct character_render_data *character = &glyph->cache[0];
+        character->unicode_codepoint = codepoint;
+        character->glyph_id = glyph_id;
+        character->units_per_em = font->units_per_em;
+
+        struct glyf_table parsed_glyph = {0};
 
         if(glyph_start > UINT32_MAX - font->glyf_record.offcet){
                 myfont_glyph_destroy(glyph);
@@ -322,14 +375,26 @@ myfont_result myfont_load_glyph(
         if(parse_glyph_data_table(
                 font->file_descriptor,
                 glyph_file_position,
-                &glyph->glyf) != 0){
+                &parsed_glyph) != 0){
+                free_parsed_glyph(&parsed_glyph);
                 myfont_glyph_destroy(glyph);
                 return MYFONT_ERROR_UNSUPPORTED;
         }
-        if(get_countour_data(&glyph->glyf,&glyph->contours) != 0){
+        character->x_min = parsed_glyph.x_min;
+        character->y_min = parsed_glyph.y_min;
+        character->x_max = parsed_glyph.x_max;
+        character->y_max = parsed_glyph.y_max;
+
+        if(get_countour_data(
+                &parsed_glyph,
+                &character->contours) != 0){
+                free_parsed_glyph(&parsed_glyph);
                 myfont_glyph_destroy(glyph);
                 return MYFONT_ERROR_INVALID_FONT;
         }
+
+        /* 描画には contours と境界値だけを使うため、TTF解析用配列は残さない。 */
+        free_parsed_glyph(&parsed_glyph);
 
         *out_glyph = glyph;
         return MYFONT_SUCCESS;
@@ -338,33 +403,107 @@ myfont_result myfont_load_glyph(
 void myfont_glyph_destroy(myfont_glyph *glyph){
         if(glyph == NULL)return;
 
-        free_countour_data(&glyph->contours);
-        free(glyph->glyf.end_pts_of_contours);
-        free(glyph->glyf.instructions);
-        free(glyph->glyf.flags);
-        free(glyph->glyf.points);
+        for(size_t i = 0;i < glyph->cache_count;i++){
+                free_character_render_data(&glyph->cache[i]);
+        }
+        free(glyph->cache);
         free(glyph);
+}
+
+myfont_result myfont_glyph_set_codepoint(
+        myfont_font *font,
+        myfont_glyph *glyph,
+        uint32_t codepoint){
+
+        if(font == NULL || glyph == NULL){
+                return MYFONT_ERROR_INVALID_ARGUMENT;
+        }
+        const struct character_render_data *current =
+                current_character_const(glyph);
+        if(current == NULL)return MYFONT_ERROR_INVALID_ARGUMENT;
+        if(current->unicode_codepoint == codepoint){
+                return MYFONT_SUCCESS;
+        }
+
+        for(size_t i = 0;i < glyph->cache_count;i++){
+                if(glyph->cache[i].unicode_codepoint == codepoint){
+                        glyph->current_index = i;
+                        return MYFONT_SUCCESS;
+                }
+        }
+
+        myfont_glyph *new_glyph = NULL;
+        myfont_result result = myfont_load_glyph(
+                font,
+                codepoint,
+                &new_glyph);
+        if(result != MYFONT_SUCCESS)return result;
+
+        if(glyph->cache_count == glyph->cache_capacity){
+                size_t new_capacity = glyph->cache_capacity * 2;
+                struct character_render_data *new_cache = realloc(
+                        glyph->cache,
+                        new_capacity * sizeof(*new_cache));
+                if(new_cache == NULL){
+                        myfont_glyph_destroy(new_glyph);
+                        return MYFONT_ERROR_ALLOCATION;
+                }
+                memset(
+                        new_cache + glyph->cache_capacity,
+                        0,
+                        (new_capacity - glyph->cache_capacity) *
+                                sizeof(*new_cache));
+                glyph->cache = new_cache;
+                glyph->cache_capacity = new_capacity;
+        }
+
+        size_t new_index = glyph->cache_count;
+        glyph->cache[new_index] = new_glyph->cache[0];
+        memset(&new_glyph->cache[0],0,sizeof(new_glyph->cache[0]));
+        glyph->cache_count++;
+        glyph->current_index = new_index;
+        myfont_glyph_destroy(new_glyph);
+        return MYFONT_SUCCESS;
 }
 
 uint16_t myfont_units_per_em(const myfont_font *font){
         return font == NULL ? 0 : font->units_per_em;
 }
 
+uint32_t myfont_glyph_codepoint(const myfont_glyph *glyph){
+        const struct character_render_data *character =
+                current_character_const(glyph);
+        return character == NULL ? 0 : character->unicode_codepoint;
+}
+
 uint16_t myfont_glyph_id(const myfont_glyph *glyph){
-        return glyph == NULL ? 0 : glyph->glyph_id;
+        const struct character_render_data *character =
+                current_character_const(glyph);
+        return character == NULL ? 0 : character->glyph_id;
+}
+
+size_t myfont_glyph_cached_count(const myfont_glyph *glyph){
+        return glyph == NULL ? 0 : glyph->cache_count;
 }
 
 size_t myfont_glyph_contour_count(const myfont_glyph *glyph){
-        return glyph == NULL ? 0 : glyph->contours.pos_data_arry_size;
+        const struct character_render_data *character =
+                current_character_const(glyph);
+        return character == NULL
+                ? 0
+                : character->contours.pos_data_arry_size;
 }
 
 size_t myfont_glyph_point_count(
         const myfont_glyph *glyph,
         size_t contour_index){
 
-        if(glyph == NULL ||
-                contour_index >= glyph->contours.pos_data_arry_size)return 0;
-        return glyph->contours.pos_data[contour_index].point_pos_data_arry_size;
+        const struct character_render_data *character =
+                current_character_const(glyph);
+        if(character == NULL || contour_index >=
+                character->contours.pos_data_arry_size)return 0;
+        return character->contours.pos_data[contour_index]
+                .point_pos_data_arry_size;
 }
 
 myfont_result myfont_glyph_get_bounds(
@@ -374,11 +513,13 @@ myfont_result myfont_glyph_get_bounds(
         int16_t *x_max,
         int16_t *y_max){
 
-        if(glyph == NULL)return MYFONT_ERROR_INVALID_ARGUMENT;
-        if(x_min != NULL)*x_min = glyph->glyf.x_min;
-        if(y_min != NULL)*y_min = glyph->glyf.y_min;
-        if(x_max != NULL)*x_max = glyph->glyf.x_max;
-        if(y_max != NULL)*y_max = glyph->glyf.y_max;
+        const struct character_render_data *character =
+                current_character_const(glyph);
+        if(character == NULL)return MYFONT_ERROR_INVALID_ARGUMENT;
+        if(x_min != NULL)*x_min = character->x_min;
+        if(y_min != NULL)*y_min = character->y_min;
+        if(x_max != NULL)*x_max = character->x_max;
+        if(y_max != NULL)*y_max = character->y_max;
         return MYFONT_SUCCESS;
 }
 
@@ -390,15 +531,17 @@ myfont_result myfont_glyph_get_point(
         int16_t *y,
         int *on_curve){
 
-        if(glyph == NULL || x == NULL || y == NULL || on_curve == NULL){
+        const struct character_render_data *character =
+                current_character_const(glyph);
+        if(character == NULL || x == NULL || y == NULL || on_curve == NULL){
                 return MYFONT_ERROR_INVALID_ARGUMENT;
         }
-        if(contour_index >= glyph->contours.pos_data_arry_size){
+        if(contour_index >= character->contours.pos_data_arry_size){
                 return MYFONT_ERROR_NOT_FOUND;
         }
 
         const struct contour_pos_data *contour =
-                &glyph->contours.pos_data[contour_index];
+                &character->contours.pos_data[contour_index];
         if(point_index >= contour->point_pos_data_arry_size){
                 return MYFONT_ERROR_NOT_FOUND;
         }
@@ -411,16 +554,30 @@ myfont_result myfont_glyph_get_point(
 }
 
 myfont_result myfont_show_glyph(
-        const myfont_font *font,
-        const myfont_glyph *glyph){
+        myfont_font *font,
+        myfont_glyph *glyph){
 
         if(font == NULL || glyph == NULL)return MYFONT_ERROR_INVALID_ARGUMENT;
-        if(show_glyph_with_raylib(
-                &glyph->contours,
-                &glyph->glyf,
-                font->units_per_em) != 0){
-                return MYFONT_ERROR_IO;
+
+        if(glyph_window_open() != 0)return MYFONT_ERROR_IO;
+
+        myfont_result input_result = MYFONT_SUCCESS;
+        while(!glyph_window_should_close()){
+                uint32_t codepoint = 0;
+                while((codepoint = glyph_window_next_codepoint()) != 0){
+                        input_result = myfont_glyph_set_codepoint(
+                                font,
+                                glyph,
+                                codepoint);
+                }
+
+                const char *input_status = input_result == MYFONT_SUCCESS
+                        ? NULL
+                        : myfont_result_string(input_result);
+                glyph_window_draw(current_character(glyph),input_status);
         }
+
+        glyph_window_close();
         return MYFONT_SUCCESS;
 }
 
