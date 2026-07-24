@@ -4,85 +4,66 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MYFONT_ON_CURVE_POINT 0x01
-#define MYFONT_X_SHORT_VECTOR 0x02
-#define MYFONT_Y_SHORT_VECTOR 0x04
-#define MYFONT_REPEAT_FLAG 0x08
-#define MYFONT_X_IS_SAME_OR_POSITIVE 0x10
-#define MYFONT_Y_IS_SAME_OR_POSITIVE 0x20
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-/* 1つの単純グリフを解析した結果。 */
-struct myfont_glyph_data{
-        int16_t number_of_contours;
-        int16_t x_min;
-        int16_t y_min;
-        int16_t x_max;
-        int16_t y_max;
+/* 内部データを隠す不透明ハンドル。利用者はメンバへ直接アクセスしない。 */
+typedef struct myfont_font myfont_font;
+typedef struct myfont_glyph myfont_glyph;
 
-        uint16_t *end_pts_of_contours;
-        size_t end_pts_of_contours_count;
+typedef enum myfont_result{
+        MYFONT_SUCCESS = 0,
+        MYFONT_ERROR_INVALID_ARGUMENT = -1,
+        MYFONT_ERROR_ALLOCATION = -2,
+        MYFONT_ERROR_IO = -3,
+        MYFONT_ERROR_INVALID_FONT = -4,
+        MYFONT_ERROR_UNSUPPORTED = -5,
+        MYFONT_ERROR_NOT_FOUND = -6,
+        MYFONT_ERROR_NO_OUTLINE = -7,
+} myfont_result;
 
-        uint16_t instruction_length;
-        uint8_t *instructions;
+/* フォントを開閉する。成功時だけ*out_fontへハンドルを返す。 */
+myfont_result myfont_open(const char *ttf_path,myfont_font **out_font);
+void myfont_close(myfont_font *font);
 
-        size_t point_count;
-        uint8_t *flags;
-        size_t flags_count;
+/* Unicode BMP文字を読み込む。現在はTrueType単純グリフとcmap format 4に対応。 */
+myfont_result myfont_load_glyph(
+        myfont_font *font,
+        uint32_t codepoint,
+        myfont_glyph **out_glyph);
+void myfont_glyph_destroy(myfont_glyph *glyph);
 
-        int16_t *x_coordinates;
-        int16_t *y_coordinates;
-};
+/* 内部配列を公開せず、必要な値だけ取得する。 */
+uint16_t myfont_units_per_em(const myfont_font *font);
+uint16_t myfont_glyph_id(const myfont_glyph *glyph);
+size_t myfont_glyph_contour_count(const myfont_glyph *glyph);
+size_t myfont_glyph_point_count(
+        const myfont_glyph *glyph,
+        size_t contour_index);
+myfont_result myfont_glyph_get_bounds(
+        const myfont_glyph *glyph,
+        int16_t *x_min,
+        int16_t *y_min,
+        int16_t *x_max,
+        int16_t *y_max);
+myfont_result myfont_glyph_get_point(
+        const myfont_glyph *glyph,
+        size_t contour_index,
+        size_t point_index,
+        int16_t *x,
+        int16_t *y,
+        int *on_curve);
 
-void myfont_glyph_data_init(struct myfont_glyph_data *glyph_data);
-void myfont_glyph_data_free(struct myfont_glyph_data *glyph_data);
+/* 既存のRaylib描画を不透明ハンドル経由で利用する。 */
+myfont_result myfont_show_glyph(
+        const myfont_font *font,
+        const myfont_glyph *glyph);
 
-/* parse前にinit、使い終わった後にfreeを呼ぶ。 */
+const char *myfont_result_string(myfont_result result);
 
-int myfont_parse_glyph_header(
-        const uint8_t *glyph_file_data,
-        size_t glyph_data_size,
-        struct myfont_glyph_data *glyph_data);
-
-int myfont_parse_end_points(
-        const uint8_t *glyph_file_data,
-        size_t glyph_data_size,
-        size_t *data_pos,
-        struct myfont_glyph_data *glyph_data);
-
-int myfont_parse_instructions(
-        const uint8_t *glyph_file_data,
-        size_t glyph_data_size,
-        size_t *data_pos,
-        struct myfont_glyph_data *glyph_data);
-
-int myfont_parse_flags(
-        const uint8_t *glyph_file_data,
-        size_t glyph_data_size,
-        size_t *data_pos,
-        struct myfont_glyph_data *glyph_data);
-
-int myfont_parse_x_coordinates(
-        const uint8_t *glyph_file_data,
-        size_t glyph_data_size,
-        size_t *data_pos,
-        struct myfont_glyph_data *glyph_data);
-
-int myfont_parse_y_coordinates(
-        const uint8_t *glyph_file_data,
-        size_t glyph_data_size,
-        size_t *data_pos,
-        struct myfont_glyph_data *glyph_data);
-
-int myfont_parse_simple_glyph(
-        int ttf_fd,
-        uint32_t glyph_file_pos,
-        uint32_t glyph_data_length,
-        struct myfont_glyph_data *glyph_data);
-
-int myfont_get_contour_range(
-        const struct myfont_glyph_data *glyph_data,
-        size_t contour_num,
-        size_t *start_point,
-        size_t *end_point);
+#ifdef __cplusplus
+}
+#endif
 
 #endif
