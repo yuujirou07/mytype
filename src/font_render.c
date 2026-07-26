@@ -153,7 +153,7 @@ int glyph_window_open(void){
         const int screen_height = 900;
         InitWindow(screen_width,screen_height,"mytype - glyph viewer");
         if(!IsWindowReady())return -1;
-        SetTargetFPS(0);
+        SetTargetFPS( 0);
         return 0;
 }
 
@@ -212,6 +212,7 @@ void glyph_window_draw(
                 character->glyph_id);
         DrawText(glyph_label,20,20,24,DARKGRAY);
         DrawText("Type a character: change glyph",20,52,18,GRAY);
+        DrawFPS(400,20);
         DrawText("ESC: close",20,76,18,GRAY);
         if(input_status != NULL){
                 char status_label[160];

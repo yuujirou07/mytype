@@ -3,12 +3,12 @@
 set -euo pipefail
 
 # PowerShell などから MSYS2 の bash.exe を直接起動した場合にも、
-# MSYS2 の基本コマンドと UCRT64 のコンパイラを見つけられるようにする。
+# MSYS2 の基本コマンドと MINGW64 のコンパイラを見つけられるようにする。
 if [[ -d /usr/bin ]]; then
         export PATH="/usr/bin:${PATH}"
 fi
-if [[ -d /ucrt64/bin ]]; then
-        export PATH="/ucrt64/bin:${PATH}"
+if [[ -d /mingw64/bin ]]; then
+        export PATH="/mingw64/bin:${PATH}"
 fi
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,13 +16,14 @@ build_dir="${project_dir}/build"
 object_dir="${build_dir}/obj"
 library_file="${build_dir}/libmyfont.a"
 sample_file="${build_dir}/mytype.exe"
-raylib_dll="${RAYLIB_DLL:-/ucrt64/bin/libraylib.dll}"
-glfw_dll="${GLFW_DLL:-/ucrt64/bin/glfw3.dll}"
+raylib_import_library="${RAYLIB_IMPORT_LIBRARY:-/mingw64/lib/libraylib.dll.a}"
+raylib_dll="${RAYLIB_DLL:-/mingw64/bin/libraylib.dll}"
+glfw_dll="${GLFW_DLL:-/mingw64/bin/glfw3.dll}"
 
 compiler="${MYTYPE_CC:-gcc}"
 if ! command -v "${compiler}" >/dev/null 2>&1; then
         printf 'error: C compiler not found: %s\n' "${compiler}" >&2
-        printf 'Run this script from the MSYS2 UCRT64 shell or set MYTYPE_CC.\n' >&2
+        printf 'Run this script from the MSYS2 MINGW64 shell or set MYTYPE_CC.\n' >&2
         exit 1
 fi
 
@@ -38,6 +39,12 @@ for runtime_dll in "${raylib_dll}" "${glfw_dll}"; do
                 exit 1
         fi
 done
+
+if [[ ! -f "${raylib_import_library}" ]]; then
+        printf 'error: raylib import library not found: %s\n' \
+                "${raylib_import_library}" >&2
+        exit 1
+fi
 
 library_sources=(
         "${project_dir}/src/myfont.c"
@@ -67,7 +74,8 @@ sample_compile_flags=(
 )
 
 link_flags=(
-        -lraylib
+        # DLL 用の import library を明示し、libraylib.a への静的リンクを避ける。
+        "${raylib_import_library}"
         -lopengl32
         -lgdi32
         -lwinmm
