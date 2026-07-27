@@ -9,10 +9,13 @@
 
 struct ttf_table_dir_data table_dir_data = {0};
 
+/* load_ttf_table_dir_data を呼ぶだけの薄いラッパー。 */
 void parse_ttf_data(int ttf_fd){
         load_ttf_table_dir_data(ttf_fd);
 }
 
+/* sfntヘッダとテーブルレコード一覧を読み、グローバルtable_dir_dataへ格納する。
+   同時にoffset_table_ctlのタグ辞書も作る（TABLE_CREATE→TABLE_SET）。 */
 int load_ttf_table_dir_data(int ttf_fd){
         if(ttf_fd < 0){
                 printf("ttf_fd error\n");
@@ -70,6 +73,7 @@ int load_ttf_table_dir_data(int ttf_fd){
         return 0;
 }
 
+/* counter(0〜4)に応じてtable_dir_dataの該当フィールドへdataを書き込む。 */
 int assignment_table_dir_mum(int counter,uint8_t *data){
         if(data == NULL)return -1;
         switch(counter){
@@ -95,12 +99,16 @@ int assignment_table_dir_mum(int counter,uint8_t *data){
 }
 
 
+/* 未使用の仮実装。tagが4文字以内なら常に0を返すだけで、実際の検索はしない。 */
 long find_offset(char *tag){
         if(tag == NULL || strlen(tag) > 4)return -1;
         return 0;       
 }
 
 
+/* tag→ファイル位置の対応表を管理する。flagsで動作を切り替える:
+   TABLE_CREATE=辞書確保, TABLE_SET=1件登録, TABLE_GET=tag検索, TABLE_FREE=解放。
+   辞書はstatic変数として関数内に保持される。 */
 long offset_table_ctl(long *offset,uint8_t *tag,int *table_num,int flags){
         if((flags != TABLE_CREATE && flags != TABLE_FREE && tag == NULL) || 
                 ((flags == TABLE_SET) && table_num == NULL))return -1;
@@ -153,6 +161,8 @@ long offset_table_ctl(long *offset,uint8_t *tag,int *table_num,int flags){
 }
 
 
+/* テーブルディレクトリをtagnameで線形探索し、該当するtable_recordを返す。
+   見つからなければNULL。 */
 struct table_record *found_tag_table(struct ttf_table_dir_data *dir_data,uint8_t tagname[tag_name_size]){
         if(dir_data == NULL || tagname == NULL) return NULL;
 
@@ -168,6 +178,7 @@ struct table_record *found_tag_table(struct ttf_table_dir_data *dir_data,uint8_t
 }
 
 
+/* maxpテーブルからnumGlyphs(グリフ総数)だけを読む。失敗時は0を返す。 */
 //仮関数
 uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd){
         off_t result = lseek(ttf_fd,offset+4,SEEK_SET);
@@ -178,10 +189,13 @@ uint16_t get_maxp_table_numGlyphs_data(long offset,int ttf_fd){
         return ui16_data;
 }
 
+/* Glyph_idがnumGlyphsの範囲内(0以上かつ未満)にあるかを確認する。 */
 bool numGlyph_check(uint16_t numGlyphs,uint16_t Glyph_id){
         if(numGlyphs <= Glyph_id || numGlyphs <= 0) return false;
         return true;
 }
+/* headテーブルからindexToLocFormat(loca形式: 0=2byte, 1=4byte)を読む。
+   失敗時は-1を返す。 */
 int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd){
         off_t result = lseek(ttf_fd,offset + 50,SEEK_SET);
         if(result <= 0)return -1;
@@ -192,6 +206,7 @@ int16_t get_head_table_indexToLocFormat(long offset,int ttf_fd){
         return i16_data;
 }
 
+/* headテーブルからunitsPerEmを読む。失敗時は0を返す。 */
 uint16_t get_head_table_units_per_em(long offset,int ttf_fd){
         if(lseek(ttf_fd,offset + 18,SEEK_SET) < 0)return 0;
 

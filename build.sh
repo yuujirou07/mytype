@@ -53,6 +53,8 @@ library_sources=(
         "${project_dir}/src/font_cmap.c"
         "${project_dir}/src/font_loca.c"
         "${project_dir}/src/font_glyph.c"
+        "${project_dir}/src/font_composite.c"
+        "${project_dir}/src/font_bitmap.c"
         "${project_dir}/src/font_render.c"
 )
 
@@ -71,6 +73,7 @@ library_compile_flags=(
 sample_compile_flags=(
         "${common_compile_flags[@]}"
         -I"${project_dir}/include"
+        -I"${project_dir}/src/internal"
 )
 
 link_flags=(

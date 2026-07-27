@@ -9,6 +9,8 @@
 
 static struct using_chr_encode_type using_chr_encode_type = {0};
 
+/* 使用するプラットフォーム/エンコーディングをグローバルなusing_chr_encode_type
+   へ記録する。encoding_idがwindows_encodeでなければunicode_encode扱い。 */
 int select_encoding(uint16_t platform_id,uint16_t encoding_id){
         using_chr_encode_type.platform_id = platform_id;
         using_chr_encode_type.encode_type = 
@@ -18,6 +20,7 @@ int select_encoding(uint16_t platform_id,uint16_t encoding_id){
         return 0;       
 }
 
+/* コンパイル時のプリプロセッサマクロから、実行環境のOS種別を判定する。 */
 enum os_type check_os(){
         enum os_type os;
         #if defined(_WIN32)
@@ -31,6 +34,8 @@ enum os_type check_os(){
         #endif
         return os;
 }
+/* this_osに応じて、優先順位付きの(platform_id, encoding_id)候補一覧をtypesへ
+   コピーする。Windowsとそれ以外で優先順を変える。 */
 void check_available_record_type(
         struct can_use_encoding_type types[CMAP_ENCODING_TYPE_COUNT],
         enum os_type this_os){
@@ -87,6 +92,8 @@ void set_cmap_encoding_record(int plat_form_id,int encoding_id,
         memcpy(*encoding_record,tmp_record,sizeof(struct cmap_encoding_record));
         return;
 }
+/* cmapサブテーブルの先頭2バイト(format)を読み、対応形式(4か12)を判定する。
+   未対応formatの場合は-1を返す。 */
 int  get_format_type(int ttf_fd,int *format_type){
         uint8_t data_strage[2];
         int result = read_exact(ttf_fd,data_strage,sizeof(data_strage));
@@ -107,6 +114,9 @@ int  get_format_type(int ttf_fd,int *format_type){
         return 0;
 }
 
+/* cmap format4サブテーブル(format以降)を解析し、end_code/start_code/
+   id_delta/id_range_offset/glyph_id_arrayをf4_dataへ確保・格納する。
+   失敗時は確保済み配列を全て解放してからNULLに戻す。 */
 int format4_data_parse(int ttf_fd,struct format4_data *f4_data){
         if(f4_data == NULL)return -1;
         uint8_t ui8_data[2];
@@ -188,6 +198,8 @@ error:
         f4_data->glyph_id_count = 0;
         return -1;
 }
+/* format4_data_parseの固定長ヘッダ読み取りループから呼ばれ、f4_mem_counter
+   (0〜5)に応じてdataをf4_dataの該当フィールドへ書き込む。 */
 int input_f4_data(struct format4_data *f4_data,uint16_t data,int f4_mem_counter){
         if(f4_data == NULL || f4_mem_counter < 0 ||
                 f4_mem_counter >= format4_uint16_mem)return -1;
@@ -215,6 +227,9 @@ int input_f4_data(struct format4_data *f4_data,uint16_t data,int f4_mem_counter)
         return 0;
 }
 
+/* input_dataを含むセグメントをstart_code/end_codeの範囲から線形探索し、
+   見つかったセグメント情報をmalloc確保して返す(呼び出し側でfree要)。
+   見つからなければNULL。 */
 struct cmap_format4_segment *found_input_chr_range(
         const struct format4_data *f4_data,uint16_t input_data){
         if(f4_data == NULL)return NULL;
@@ -237,6 +252,8 @@ struct cmap_format4_segment *found_input_chr_range(
 }
 
 
+/* セグメントのid_range_offsetが0ならid_delta加算だけでglyph_idを求め、
+   0でなければglyph_id_array経由で参照する(cmap format4の仕様どおり)。 */
 int get_glyph_id(
         const struct format4_data *f4_data,
         const struct cmap_format4_segment *f4_seg_data,

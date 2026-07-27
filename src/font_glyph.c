@@ -7,6 +7,10 @@
 #include "font_func_flags.h"
 #include "font_glyph.h"
 
+/* glyfテーブル中の単純グリフ1つを、指定オフセットから解析する。
+   number_of_contours・境界値・輪郭終端配列・命令・点フラグ・座標を読み、
+   glyf_tableへ格納する。複合グリフ(number_of_contours<0)はここでは扱わない。
+   失敗時は途中まで確保した領域を解放してから-1を返す。 */
 int parse_glyph_data_table(long ttf_fd,uint32_t glyf_file_table_offset,struct glyf_table *glyf_table){
         if(glyf_table == NULL){
                 printf("glyf table is  NULL\n");
@@ -272,6 +276,9 @@ error:
         glyf_table->instruction_length = 0;
         return -1;
 }
+/* parse_glyph_data_tableで得たglif_tableのフラット配列を、輪郭ごとの
+   point_pos配列(contour_data)へ組み替える。描画で使いやすい形にするための
+   変換で、点の座標・on-curveフラグはそのまま引き継ぐ。 */
 int get_countour_data(struct glyf_table *glif_table,struct contour_data *contour_data){
         if(contour_data == NULL || glif_table == NULL
                 || contour_data->pos_data != NULL)return -1;
@@ -350,6 +357,7 @@ error:
         return -1;
 }
 
+/* get_countour_dataが確保したcontour_dataの中身を全て解放する。 */
 void free_countour_data(struct contour_data *contour_data){
         if(contour_data == NULL)return;
 

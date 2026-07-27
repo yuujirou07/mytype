@@ -6,7 +6,9 @@
 #include "myfont.h"
 
 #include "font_binary.h"
+#include "font_bitmap.h"
 #include "font_cmap.h"
+#include "font_composite.h"
 #include "font_func_flags.h"
 #include "font_glyph.h"
 #include "font_loca.h"
@@ -30,6 +32,8 @@ struct myfont_glyph{
         size_t current_index;
 };
 
+/* glyphのキャッシュ中で現在選択されている1文字分のデータを返す。
+   未初期化・範囲外ならNULL。 */
 static struct character_render_data *current_character(
         myfont_glyph *glyph){
 
@@ -38,6 +42,7 @@ static struct character_render_data *current_character(
         return &glyph->cache[glyph->current_index];
 }
 
+/* current_characterのconst版。読み取り専用アクセサから使う。 */
 static const struct character_render_data *current_character_const(
         const myfont_glyph *glyph){
 
@@ -46,6 +51,7 @@ static const struct character_render_data *current_character_const(
         return &glyph->cache[glyph->current_index];
 }
 
+/* character_render_data 1件分のcontoursを解放し、ゼロ初期化に戻す。 */
 static void free_character_render_data(
         struct character_render_data *character){
 
@@ -55,16 +61,7 @@ static void free_character_render_data(
         memset(character,0,sizeof(*character));
 }
 
-static void free_parsed_glyph(struct glyf_table *glyph_outline){
-        if(glyph_outline == NULL)return;
-
-        free(glyph_outline->end_pts_of_contours);
-        free(glyph_outline->instructions);
-        free(glyph_outline->flags);
-        free(glyph_outline->points);
-        memset(glyph_outline,0,sizeof(*glyph_outline));
-}
-
+/* cmap format4の解析結果(各配列)を解放し、ゼロ初期化に戻す。 */
 static void free_format4(struct format4_data *format4){
         if(format4 == NULL)return;
 
@@ -76,6 +73,7 @@ static void free_format4(struct format4_data *format4){
         memset(format4,0,sizeof(*format4));
 }
 
+/* loca解析結果(2byte/4byteどちらの形式でも)を解放し、ゼロ初期化に戻す。 */
 static void free_loca(struct loca_table_data_wrapper *loca){
         if(loca == NULL)return;
 
@@ -91,12 +89,17 @@ static void free_loca(struct loca_table_data_wrapper *loca){
         memset(loca,0,sizeof(*loca));
 }
 
+/* font_table.c側のグローバル状態(table_dir_dataとoffset_table_ctlの辞書)を
+   まとめて解放する。myfont_openは複数回呼ばれる可能性があるため、
+   使い終えたら都度クリアする必要がある。 */
 static void clear_table_loader_state(void){
         free(table_dir_data.tableRecords);
         memset(&table_dir_data,0,sizeof(table_dir_data));
         (void)offset_table_ctl(NULL,NULL,NULL,TABLE_FREE);
 }
 
+/* cmapエンコーディングレコードの優先度を決める。format4以外は対象外(-1)。
+   Windows Unicode BMPを最優先とし、Unicodeプラットフォームがそれに続く。 */
 static int cmap_record_priority(
         const struct cmap_encoding_record *record,
         uint16_t format){
@@ -110,6 +113,8 @@ static int cmap_record_priority(
         return 10;
 }
 
+/* cmapテーブルのエンコーディングレコード一覧を読み、cmap_record_priorityで
+   最良のformat4サブテーブルを選んでfont->cmap_format4へ解析結果を格納する。 */
 static myfont_result load_cmap_format4(
         myfont_font *font,
         const struct table_record *cmap_record){
@@ -209,6 +214,10 @@ cleanup:
         return result;
 }
 
+/* TTFファイルを開き、テーブルディレクトリ・cmap・head・maxp・locaを解析して
+   myfont_fontを構築する。途中で失敗した場合はmyfont_closeで後片付けし、
+   対応するエラーコードを返す。glyf_recordの中身自体はここでは解析せず、
+   位置情報だけ保持しておく(実際のグリフ解析はmyfont_load_glyphで行う)。 */
 myfont_result myfont_open(const char *ttf_path,myfont_font **out_font){
         if(ttf_path == NULL || out_font == NULL){
                 return MYFONT_ERROR_INVALID_ARGUMENT;
@@ -295,6 +304,8 @@ myfont_result myfont_open(const char *ttf_path,myfont_font **out_font){
         return MYFONT_SUCCESS;
 }
 
+/* myfont_fontが保持する全リソース(fd, テーブルディレクトリ, cmap, loca)を
+   解放する。font自体がNULLでも安全に呼べる。 */
 void myfont_close(myfont_font *font){
         if(font == NULL)return;
 
@@ -305,6 +316,9 @@ void myfont_close(myfont_font *font){
         free(font);
 }
 
+/* codepointをcmap format4でglyph_idへ変換し、loca位置を求めたうえで
+   load_glyph_outline(font_composite.c)を使って輪郭を読み込み、新規の
+   myfont_glyphを1件のキャッシュ付きで生成する。 */
 myfont_result myfont_load_glyph(
         myfont_font *font,
         uint32_t codepoint,
@@ -365,41 +379,26 @@ myfont_result myfont_load_glyph(
         character->glyph_id = glyph_id;
         character->units_per_em = font->units_per_em;
 
-        struct glyf_table parsed_glyph = {0};
-
-        if(glyph_start > UINT32_MAX - font->glyf_record.offcet){
-                myfont_glyph_destroy(glyph);
-                return MYFONT_ERROR_INVALID_FONT;
-        }
-        uint32_t glyph_file_position = font->glyf_record.offcet + glyph_start;
-        if(parse_glyph_data_table(
+        /* 単純グリフと複合グリフの切り分けは font_composite.c 側で行う。 */
+        int outline_result = load_glyph_outline(
                 font->file_descriptor,
-                glyph_file_position,
-                &parsed_glyph) != 0){
-                free_parsed_glyph(&parsed_glyph);
+                &font->loca,
+                &font->glyf_record,
+                font->glyph_count,
+                glyph_id,
+                character);
+        if(outline_result != GLYPH_OUTLINE_OK){
                 myfont_glyph_destroy(glyph);
-                return MYFONT_ERROR_UNSUPPORTED;
+                return outline_result == GLYPH_OUTLINE_ERROR_UNSUPPORTED
+                        ? MYFONT_ERROR_UNSUPPORTED
+                        : MYFONT_ERROR_INVALID_FONT;
         }
-        character->x_min = parsed_glyph.x_min;
-        character->y_min = parsed_glyph.y_min;
-        character->x_max = parsed_glyph.x_max;
-        character->y_max = parsed_glyph.y_max;
-
-        if(get_countour_data(
-                &parsed_glyph,
-                &character->contours) != 0){
-                free_parsed_glyph(&parsed_glyph);
-                myfont_glyph_destroy(glyph);
-                return MYFONT_ERROR_INVALID_FONT;
-        }
-
-        /* 描画には contours と境界値だけを使うため、TTF解析用配列は残さない。 */
-        free_parsed_glyph(&parsed_glyph);
 
         *out_glyph = glyph;
         return MYFONT_SUCCESS;
 }
 
+/* myfont_glyphのキャッシュ配列を全件解放してから、glyph自体を解放する。 */
 void myfont_glyph_destroy(myfont_glyph *glyph){
         if(glyph == NULL)return;
 
@@ -410,6 +409,10 @@ void myfont_glyph_destroy(myfont_glyph *glyph){
         free(glyph);
 }
 
+/* glyphの表示対象をcodepointへ切り替える。既にキャッシュ済みならそこへ
+   current_indexを移すだけ、未キャッシュならmyfont_load_glyphで新規に
+   読み込んでからキャッシュ配列(必要なら2倍拡張)へ追加する。
+   読み込みに失敗した場合、現在表示中のキャッシュは変更しない。 */
 myfont_result myfont_glyph_set_codepoint(
         myfont_font *font,
         myfont_glyph *glyph,
@@ -466,26 +469,31 @@ myfont_result myfont_glyph_set_codepoint(
         return MYFONT_SUCCESS;
 }
 
+/* フォントのunitsPerEmを返す。fontがNULLなら0。 */
 uint16_t myfont_units_per_em(const myfont_font *font){
         return font == NULL ? 0 : font->units_per_em;
 }
 
+/* 現在選択中の文字のUnicodeコードポイントを返す。未選択なら0。 */
 uint32_t myfont_glyph_codepoint(const myfont_glyph *glyph){
         const struct character_render_data *character =
                 current_character_const(glyph);
         return character == NULL ? 0 : character->unicode_codepoint;
 }
 
+/* 現在選択中の文字のグリフIDを返す。未選択なら0。 */
 uint16_t myfont_glyph_id(const myfont_glyph *glyph){
         const struct character_render_data *character =
                 current_character_const(glyph);
         return character == NULL ? 0 : character->glyph_id;
 }
 
+/* このglyphハンドルにキャッシュされている文字数を返す。 */
 size_t myfont_glyph_cached_count(const myfont_glyph *glyph){
         return glyph == NULL ? 0 : glyph->cache_count;
 }
 
+/* 現在選択中の文字の輪郭数を返す。未選択なら0。 */
 size_t myfont_glyph_contour_count(const myfont_glyph *glyph){
         const struct character_render_data *character =
                 current_character_const(glyph);
@@ -494,6 +502,8 @@ size_t myfont_glyph_contour_count(const myfont_glyph *glyph){
                 : character->contours.pos_data_arry_size;
 }
 
+/* 現在選択中の文字の、contour_index番目の輪郭の点数を返す。
+   未選択またはcontour_indexが範囲外なら0。 */
 size_t myfont_glyph_point_count(
         const myfont_glyph *glyph,
         size_t contour_index){
@@ -506,6 +516,8 @@ size_t myfont_glyph_point_count(
                 .point_pos_data_arry_size;
 }
 
+/* 現在選択中の文字の境界(x_min, y_min, x_max, y_max)を、NULLでない
+   出力ポインタにだけ書き込む。 */
 myfont_result myfont_glyph_get_bounds(
         const myfont_glyph *glyph,
         int16_t *x_min,
@@ -523,6 +535,8 @@ myfont_result myfont_glyph_get_bounds(
         return MYFONT_SUCCESS;
 }
 
+/* 現在選択中の文字の、指定した輪郭・点番号の座標とオンカーブ判定を取得する。
+   範囲外ならMYFONT_ERROR_NOT_FOUND。 */
 myfont_result myfont_glyph_get_point(
         const myfont_glyph *glyph,
         size_t contour_index,
@@ -550,6 +564,28 @@ myfont_result myfont_glyph_get_point(
         *x = point->pos_x;
         *y = point->pos_y;
         *on_curve = (point->flags & ON_CURVE_POINT) != 0;
+        return MYFONT_SUCCESS;
+}
+
+/* raylibウィンドウを開き、ウィンドウが閉じられるまで入力文字に応じて
+   glyphの表示内容を切り替えながら描画し続けるメインループ。
+   font_render.cのビューア関数群を呼び出すだけの橋渡し役。 */
+/* current_character_constでcharacter_render_dataを取り出し、
+   build_glyph_bitmap(font_composite.cではなくfont_bitmap.c側)へ渡すだけの
+   橋渡し。myfont_glyphの中身を外部へ晒さずビットマップ化を提供する。 */
+myfont_result myfont_glyph_build_bitmap(
+        const myfont_glyph *glyph,
+        struct glyph_bitmap *out_bitmap){
+
+        const struct character_render_data *character =
+                current_character_const(glyph);
+        if(character == NULL || out_bitmap == NULL){
+                return MYFONT_ERROR_INVALID_ARGUMENT;
+        }
+
+        if(build_glyph_bitmap(character,out_bitmap) != 0){
+                return MYFONT_ERROR_INVALID_FONT;
+        }
         return MYFONT_SUCCESS;
 }
 
@@ -581,6 +617,7 @@ myfont_result myfont_show_glyph(
         return MYFONT_SUCCESS;
 }
 
+/* myfont_resultを人間が読めるメッセージ文字列に変換する。 */
 const char *myfont_result_string(myfont_result result){
         switch(result){
                 case MYFONT_SUCCESS:

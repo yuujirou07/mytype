@@ -3,6 +3,8 @@
 
 #include "myfont.h"
 
+/* glyphの現在表示中の文字が期待するcodepoint/キャッシュ件数と一致するかを
+   確認する。不一致ならstderrに詳細を出して-1を返す。 */
 static int expect_character(
         const myfont_glyph *glyph,
         uint32_t expected_codepoint,
@@ -23,6 +25,9 @@ static int expect_character(
         return -1;
 }
 
+/* myfont_glyphのキャッシュ動作(新規読み込み・既存キャッシュの再利用・
+   未対応入力での現状維持)を検証するテスト。引数にフォントファイルパスを
+   1つ取る。 */
 int main(int argc,char **argv){
         if(argc != 2){
                 fprintf(stderr,"usage: glyph_cache_test FONT_FILE\n");

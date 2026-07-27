@@ -9,6 +9,8 @@
 #include "font_func_flags.h"
 #include "font_render.h"
 static bool key_pressed = false;
+/* フォント座標系(x_min基準・y上向き)の点を、画面座標系(左上原点・y下向き)
+   へ、scale倍しoffset_x/yだけずらして変換する。 */
 static Vector2 point_pos_to_screen(
         const struct point_pos *point,
         int16_t x_min,
@@ -23,6 +25,7 @@ static Vector2 point_pos_to_screen(
         return screen_point;
 }
 
+/* 2点の中点を求める。オフカーブ点が連続する輪郭の補間に使う。 */
 static Vector2 get_middle_point(Vector2 point_a,Vector2 point_b){
         Vector2 middle_point;
         middle_point.x = (point_a.x + point_b.x) / 2.0f;
@@ -30,6 +33,8 @@ static Vector2 get_middle_point(Vector2 point_a,Vector2 point_b){
         return middle_point;
 }
 
+/* start_point→control_point→end_pointの2次ベジエ曲線を、split_count個の
+   線分に分割してDrawLineExで描画する。 */
 static void draw_quadratic_curve(
         Vector2 start_point,
         Vector2 control_point,
@@ -60,6 +65,10 @@ static void draw_quadratic_curve(
 
 
 
+/* 輪郭1つ分を描画する。オンカーブ点同士は直線、オフカーブ点(制御点)を
+   挟む場合は2次ベジエで結ぶ。始点の選び方は、TrueTypeの規約どおり
+   「先頭がオンカーブならそこから、そうでなければ末尾かオンカーブ点間の
+   中点から」とする。 */
 static void draw_one_countour(
         const struct contour_pos_data *countour,
         int16_t x_min,
@@ -148,25 +157,31 @@ static void draw_one_countour(
         DrawLineEx(current_point,start_point,3.0f,BLACK);
 }
 
+/* raylibウィンドウを開く。失敗時は-1を返す。 */
 int glyph_window_open(void){
         const int screen_width = 900;
         const int screen_height = 900;
         InitWindow(screen_width,screen_height,"mytype - glyph viewer");
         if(!IsWindowReady())return -1;
-        SetTargetFPS( 0);
+        SetTargetFPS( 400);
         return 0;
 }
 
+/* ウィンドウが閉じられるべきか(未初期化、またはユーザーが閉じ操作をした)を返す。 */
 int glyph_window_should_close(void){
         return !IsWindowReady() || WindowShouldClose();
 }
 
+/* このフレームで入力された文字のコードポイントを1つ取り出す。無ければ0。 */
 uint32_t glyph_window_next_codepoint(void){
         int codepoint = GetCharPressed();
         if(codepoint > 0)key_pressed = true;
         return codepoint > 0 ? (uint32_t)codepoint : 0;
 }
 
+/* 1フレーム分の描画を行う。characterの全輪郭を画面中央に収まるようscale・
+   offsetを計算して描き、コードポイント/グリフIDのラベルやFPS、
+   input_statusがあればエラー表示も添える。 */
 void glyph_window_draw(
         const struct character_render_data *character,
         const char *input_status){
@@ -233,6 +248,7 @@ void glyph_window_draw(
         memcpy(&chr,&character->unicode_codepoint,sizeof(chr));
 }
 
+/* raylibウィンドウを閉じる。既に閉じている場合は何もしない。 */
 void glyph_window_close(void){
         if(!IsWindowReady())return;
         CloseWindow();

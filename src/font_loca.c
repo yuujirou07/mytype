@@ -5,6 +5,9 @@
 #include "font_binary.h"
 #include "font_loca.h"
 
+/* loca形式0(2byte)を読む。各offsetは2byteで格納されるため2倍して実オフセット
+   に直す前提の生値をそのまま保持する。numGlyph+1個読み、テーブル長と
+   一致しなければエラー。 */
 int parse_2byte_loca_table(
         int ttf_fd,
         struct table_record table_record,
@@ -52,6 +55,8 @@ int parse_2byte_loca_table(
 }
 
 
+/* loca形式1(4byte)を読む。offsetは実バイト位置そのまま。numGlyph+1個読み、
+   テーブル長と一致しなければエラー。 */
 int parse_4byte_loca_table(
         int ttf_fd,
         struct table_record table_record,
@@ -98,6 +103,7 @@ int parse_4byte_loca_table(
 
 
 
+/* 2byte形式のloca配列からnum番目の生オフセット値を取り出す。範囲外は0。 */
 uint16_t get_2b_loca_arry_num_data(struct loca_table_2byte_format loca_table_2b,int num){
         if(loca_table_2b.offsets == NULL){
                 printf("loca_table_2b offsets is NULL\n");
@@ -111,6 +117,7 @@ uint16_t get_2b_loca_arry_num_data(struct loca_table_2byte_format loca_table_2b,
         return loca_table_2b.offsets[num];
 }
 
+/* 4byte形式のloca配列からnum番目のオフセット値を取り出す。範囲外は0。 */
 uint32_t get_4b_loca_arry_num_data(struct loca_table_4byte_format loca_table_4b,int num){
          if(loca_table_4b.offsets == NULL){
                 printf("loca_table_2b offsets is NULL\n");
@@ -124,6 +131,8 @@ uint32_t get_4b_loca_arry_num_data(struct loca_table_4byte_format loca_table_4b,
         return loca_table_4b.offsets[num];
 }
 
+/* glyph_idとglyph_id+1のloca値から、そのグリフのglyfテーブル内での
+   開始・終了オフセットを求める。2byte形式は生値を2倍して実オフセットに直す。 */
 int get_glyph_loca_pos(
         const struct loca_table_data_wrapper *loca_table_data_wrapp,
         uint16_t glyph_id,
@@ -158,6 +167,8 @@ int get_glyph_loca_pos(
         return 0;
 }
 
+/* indexToLocFormat(head由来)に応じてparse_2byte/4byte_loca_tableへ振り分け、
+   結果をloca_table_data_wrapperへ格納する入口関数。 */
 int loca_table_eazy_parse(
         int ttf_fd,int indexToLocFormat,
         struct table_record loca_table,

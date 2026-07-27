@@ -61,6 +61,17 @@ myfont_result myfont_glyph_get_point(
         int16_t *y,
         int *on_curve);
 
+/* 完全な定義はfont_bitmap.hを参照。myfont_glyph_build_bitmapを使う側は
+   font_bitmap.hを直接includeし、struct glyph_bitmapの中身(bitmap配列,
+   width, height)へアクセスすること。 */
+struct glyph_bitmap;
+
+/* 現在選択中の文字の輪郭を2値ビットマップへラスタライズする。
+   解放にはfont_bitmap.hのfree_glyph_bitmapを使う。 */
+myfont_result myfont_glyph_build_bitmap(
+        const myfont_glyph *glyph,
+        struct glyph_bitmap *out_bitmap);
+
 /* 既存のRaylib描画を不透明ハンドル経由で利用する。 */
 myfont_result myfont_show_glyph(
         myfont_font *font,
