@@ -10,7 +10,7 @@
 /* glyfテーブル中の単純グリフ1つを、指定オフセットから解析する。
    number_of_contours・境界値・輪郭終端配列・命令・点フラグ・座標を読み、
    glyf_tableへ格納する。複合グリフ(number_of_contours<0)はここでは扱わない。
-   失敗時は途中まで確保した領域を解放してから-1を返す。 */
+        失敗時は途中まで確保した領域を解放してから-1を返す。 */
 int parse_glyph_data_table(long ttf_fd,uint32_t glyf_file_table_offset,struct glyf_table *glyf_table){
         if(glyf_table == NULL){
                 printf("glyf table is  NULL\n");
