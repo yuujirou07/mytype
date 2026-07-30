@@ -55,12 +55,14 @@ static int append_glyph(
         int depth);
 
 
+
 /* 32bit値をint16_tの範囲に丸め込む(飽和)。 */
 static int16_t clamp_to_int16(int32_t value){
         if(value > INT16_MAX)return INT16_MAX;
         if(value < INT16_MIN)return INT16_MIN;
         return (int16_t)value;
 }
+
 
 /* floatを四捨五入してint16_tへ変換する(飽和付き)。座標変換後の丸めに使う。 */
 static int16_t round_to_int16(float value){

@@ -183,7 +183,6 @@ int main(int argc,char **argv){
                         bitmap.width,
                         bitmap.height);
                 print_glyph_bitmap(&bitmap);
-
                 free_glyph_bitmap(&bitmap);
         }
 
