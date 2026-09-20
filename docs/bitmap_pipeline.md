@@ -3,11 +3,10 @@
 `mytype`ライブラリを使って、TrueTypeフォント(.ttf)から1文字分の
 ビットマップ(白黒の画素データ)を取得するまでの手順を説明する。
 
-使うヘッダは2つ:
+使うヘッダ:
 
 ```c
-#include "myfont.h"       /* 公開API */
-#include "font_bitmap.h"  /* struct glyph_bitmap の中身を使うために必要 */
+#include "myfont.h"
 ```
 
 ## 手順
@@ -51,22 +50,22 @@ result = myfont_glyph_set_codepoint(font, glyph, 0x3044 /* 'い' */);
 ### 3. ビットマップを作る
 
 ```c
-struct glyph_bitmap bitmap = {0};
+glyph_bitmap bitmap = {0};
 result = myfont_glyph_build_bitmap(glyph, &bitmap);
 if(result != MYFONT_SUCCESS){
         fprintf(stderr, "build_bitmap failed: %s\n", myfont_result_string(result));
 }
 ```
 
-`struct glyph_bitmap`の中身(`font_bitmap.h`で定義):
+`glyph_bitmap`の中身:
 
 ```c
-struct glyph_bitmap{
+typedef struct glyph_bitmap{
         uint32_t unicode_codepoint;
         int **bitmap;   /* bitmap[row][col]: 0=文字の外, 1=文字の内側 */
         int width;
         int height;
-};
+} glyph_bitmap;
 ```
 
 - `bitmap[row][col]`が`1`ならその画素は文字の内側(黒く塗る画素)。
@@ -129,7 +128,6 @@ myfont_glyph_get_bounds(glyph, &x_min, &y_min, &x_max, &y_max); /* 文字の境�
 ```c
 #include <stdio.h>
 #include "myfont.h"
-#include "font_bitmap.h"
 
 int main(void){
         myfont_font *font = NULL;
@@ -143,7 +141,7 @@ int main(void){
                 return 1;
         }
 
-        struct glyph_bitmap bitmap = {0};
+        glyph_bitmap bitmap = {0};
         if(myfont_glyph_build_bitmap(glyph, &bitmap) == MYFONT_SUCCESS){
                 printf("%dx%d\n", bitmap.width, bitmap.height);
                 free_glyph_bitmap(&bitmap);
@@ -154,6 +152,3 @@ int main(void){
         return 0;
 }
 ```
-
-より実践的な例は`src/font_func.c`の`main()`を参照
-(標準入力から文字を読み、ビットマップをASCIIアートで表示している)。

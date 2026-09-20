@@ -15,10 +15,7 @@ project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 build_dir="${project_dir}/build"
 object_dir="${build_dir}/obj"
 library_file="${build_dir}/libmyfont.a"
-sample_file="${build_dir}/mytype.exe"
-raylib_import_library="${RAYLIB_IMPORT_LIBRARY:-/mingw64/lib/libraylib.dll.a}"
-raylib_dll="${RAYLIB_DLL:-/mingw64/bin/libraylib.dll}"
-glfw_dll="${GLFW_DLL:-/mingw64/bin/glfw3.dll}"
+test_file="${build_dir}/glyph_cache_test.exe"
 
 compiler="${MYTYPE_CC:-gcc}"
 if ! command -v "${compiler}" >/dev/null 2>&1; then
@@ -33,19 +30,6 @@ if ! command -v "${archiver}" >/dev/null 2>&1; then
         exit 1
 fi
 
-for runtime_dll in "${raylib_dll}" "${glfw_dll}"; do
-        if [[ ! -f "${runtime_dll}" ]]; then
-                printf 'error: runtime DLL not found: %s\n' "${runtime_dll}" >&2
-                exit 1
-        fi
-done
-
-if [[ ! -f "${raylib_import_library}" ]]; then
-        printf 'error: raylib import library not found: %s\n' \
-                "${raylib_import_library}" >&2
-        exit 1
-fi
-
 library_sources=(
         "${project_dir}/src/myfont.c"
         "${project_dir}/src/font_binary.c"
@@ -55,7 +39,6 @@ library_sources=(
         "${project_dir}/src/font_glyph.c"
         "${project_dir}/src/font_composite.c"
         "${project_dir}/src/font_bitmap.c"
-        "${project_dir}/src/font_render.c"
 )
 
 common_compile_flags=(
@@ -68,20 +51,6 @@ library_compile_flags=(
         "${common_compile_flags[@]}"
         -I"${project_dir}/include"
         -I"${project_dir}/src/internal"
-)
-
-sample_compile_flags=(
-        "${common_compile_flags[@]}"
-        -I"${project_dir}/include"
-        -I"${project_dir}/src/internal"
-)
-
-link_flags=(
-        # DLL 用の import library を明示し、libraylib.a への静的リンクを避ける。
-        "${raylib_import_library}"
-        -lopengl32
-        -lgdi32
-        -lwinmm
 )
 
 mkdir -p -- "${object_dir}"
@@ -99,23 +68,20 @@ for source_file in "${library_sources[@]}"; do
 done
 
 printf 'Archiving %s\n' "${library_file}"
-"${archiver}" rcs "${library_file}" "${objects[@]}"
+temporary_library="${library_file}.tmp"
+rm -f -- "${temporary_library}"
+"${archiver}" rcs "${temporary_library}" "${objects[@]}"
+mv -f -- "${temporary_library}" "${library_file}"
 
-printf 'Linking sample %s\n' "${sample_file}"
+printf 'Linking test %s\n' "${test_file}"
 "${compiler}" \
-        "${sample_compile_flags[@]}" \
-        "${project_dir}/src/font_func.c" \
+        "${library_compile_flags[@]}" \
+        "${project_dir}/tests/glyph_cache_test.c" \
         -L"${build_dir}" \
         -lmyfont \
-        -o "${sample_file}" \
-        "${link_flags[@]}"
-
-cp -f -- "${raylib_dll}" "${build_dir}/libraylib.dll"
-cp -f -- "${glfw_dll}" "${build_dir}/glfw3.dll"
+        -lm \
+        -o "${test_file}"
 
 printf 'Library: %s\n' "${library_file}"
 printf 'Public header: %s\n' "${project_dir}/include/myfont.h"
-printf 'Sample: %s\n' "${sample_file}"
-printf 'Runtime DLLs: %s, %s\n' \
-        "${build_dir}/libraylib.dll" \
-        "${build_dir}/glfw3.dll"
+printf 'Test: %s\n' "${test_file}"

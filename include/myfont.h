@@ -12,6 +12,14 @@ extern "C" {
 typedef struct myfont_font myfont_font;
 typedef struct myfont_glyph myfont_glyph;
 
+/* bitmap[row][col]は0(輪郭外)または1(輪郭内)。row=0は文字の上端。 */
+typedef struct glyph_bitmap{
+        uint32_t unicode_codepoint;
+        int **bitmap;
+        int width;
+        int height;
+} glyph_bitmap;
+
 typedef enum myfont_result{
         MYFONT_SUCCESS = 0,
         MYFONT_ERROR_INVALID_ARGUMENT = -1,
@@ -61,21 +69,13 @@ myfont_result myfont_glyph_get_point(
         int16_t *y,
         int *on_curve);
 
-/* 完全な定義はfont_bitmap.hを参照。myfont_glyph_build_bitmapを使う側は
-   font_bitmap.hを直接includeし、struct glyph_bitmapの中身(bitmap配列,
-   width, height)へアクセスすること。 */
-struct glyph_bitmap;
-
 /* 現在選択中の文字の輪郭を2値ビットマップへラスタライズする。
-   解放にはfont_bitmap.hのfree_glyph_bitmapを使う。 */
+   bitmap[row][col]は0(輪郭外)または1(輪郭内)。 */
 myfont_result myfont_glyph_build_bitmap(
         const myfont_glyph *glyph,
-        struct glyph_bitmap *out_bitmap);
-
-/* 既存のRaylib描画を不透明ハンドル経由で利用する。 */
-myfont_result myfont_show_glyph(
-        myfont_font *font,
-        myfont_glyph *glyph);
+        glyph_bitmap *out_bitmap);
+/* myfont_glyph_build_bitmapが確保した画素配列を解放する。 */
+void free_glyph_bitmap(glyph_bitmap *bitmap);
 
 const char *myfont_result_string(myfont_result result);
 

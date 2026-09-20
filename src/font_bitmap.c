@@ -8,7 +8,7 @@
 #include "font_func_flags.h"
 #include "font_glyph.h"
 
-/* 2次ベジエ曲線を分割する線分の数。font_render.cの描画と同じ値を使う。 */
+/* 2次ベジエ曲線を分割する線分の数。 */
 #define BEZIER_SPLIT_COUNT 24
 
 /* 輪郭を平坦化した後の1点。float座標で、フォント単位系のまま持つ
@@ -93,9 +93,8 @@ static int push_quadratic_curve(
 }
 
 /* 輪郭1つをポリゴン(直線近似された点列)へ平坦化してpolygonへ追加する。
-   オンカーブ/オフカーブ点の扱いはfont_render.cのdraw_one_countourと同じ
-   規則(先頭がオンカーブならそこから、そうでなければ末尾かオンカーブ点間の
-   中点から始める)に従う。 */
+   先頭がオンカーブならそこから、そうでなければ末尾かオンカーブ点間の
+   中点から始める。 */
 static int flatten_contour(
         const struct contour_pos_data *contour,
         struct polygon *polygon){

@@ -12,8 +12,11 @@
 #include "font_func_flags.h"
 #include "font_glyph.h"
 #include "font_loca.h"
-#include "font_render.h"
 #include "font_table.h"
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 
 struct myfont_font{
         int file_descriptor;
@@ -32,17 +35,7 @@ struct myfont_glyph{
         size_t current_index;
 };
 
-/* glyphのキャッシュ中で現在選択されている1文字分のデータを返す。
-   未初期化・範囲外ならNULL。 */
-static struct character_render_data *current_character(
-        myfont_glyph *glyph){
-
-        if(glyph == NULL || glyph->cache == NULL ||
-                glyph->current_index >= glyph->cache_count)return NULL;
-        return &glyph->cache[glyph->current_index];
-}
-
-/* current_characterのconst版。読み取り専用アクセサから使う。 */
+/* glyphのキャッシュ中で現在選択されている1文字分のデータを返す。 */
 static const struct character_render_data *current_character_const(
         const myfont_glyph *glyph){
 
@@ -567,9 +560,6 @@ myfont_result myfont_glyph_get_point(
         return MYFONT_SUCCESS;
 }
 
-/* raylibウィンドウを開き、ウィンドウが閉じられるまで入力文字に応じて
-   glyphの表示内容を切り替えながら描画し続けるメインループ。
-   font_render.cのビューア関数群を呼び出すだけの橋渡し役。 */
 /* current_character_constでcharacter_render_dataを取り出し、
    build_glyph_bitmap(font_composite.cではなくfont_bitmap.c側)へ渡すだけの
    橋渡し。myfont_glyphの中身を外部へ晒さずビットマップ化を提供する。 */
@@ -589,34 +579,6 @@ myfont_result myfont_glyph_build_bitmap(
         return MYFONT_SUCCESS;
 }
 
-myfont_result myfont_show_glyph(
-        myfont_font *font,
-        myfont_glyph *glyph){
-
-        if(font == NULL || glyph == NULL)return MYFONT_ERROR_INVALID_ARGUMENT;
-
-        if(glyph_window_open() != 0)return MYFONT_ERROR_IO;
-
-        myfont_result input_result = MYFONT_SUCCESS;
-        while(!glyph_window_should_close()){
-                uint32_t codepoint = 0;
-                while((codepoint = glyph_window_next_codepoint()) != 0){
-                        input_result = myfont_glyph_set_codepoint(
-                                font,
-                                glyph,
-                                codepoint);
-                }
-
-                const char *input_status = input_result == MYFONT_SUCCESS
-                        ? NULL
-                        : myfont_result_string(input_result);
-                glyph_window_draw(current_character(glyph),input_status);
-        }
-
-        glyph_window_close();
-        return MYFONT_SUCCESS;
-}
-
 /* myfont_resultを人間が読めるメッセージ文字列に変換する。 */
 const char *myfont_result_string(myfont_result result){
         switch(result){
@@ -627,7 +589,7 @@ const char *myfont_result_string(myfont_result result){
                 case MYFONT_ERROR_ALLOCATION:
                         return "memory allocation failed";
                 case MYFONT_ERROR_IO:
-                        return "file or display I/O failed";
+                        return "file I/O failed";
                 case MYFONT_ERROR_INVALID_FONT:
                         return "invalid TrueType font data";
                 case MYFONT_ERROR_UNSUPPORTED:

@@ -45,11 +45,34 @@ int main(int argc,char **argv){
                 return 4;
         }
 
+        glyph_bitmap bitmap = {0};
+        result = myfont_glyph_build_bitmap(glyph,&bitmap);
+        if(result != MYFONT_SUCCESS || bitmap.bitmap == NULL ||
+                bitmap.width <= 0 || bitmap.height <= 0){
+                free_glyph_bitmap(&bitmap);
+                myfont_glyph_destroy(glyph);
+                myfont_close(font);
+                return 5;
+        }
+        int filled_pixel_count = 0;
+        for(int row = 0;row < bitmap.height;row++){
+                for(int col = 0;col < bitmap.width;col++){
+                        filled_pixel_count += bitmap.bitmap[row][col] != 0;
+                }
+        }
+        if(filled_pixel_count == 0){
+                free_glyph_bitmap(&bitmap);
+                myfont_glyph_destroy(glyph);
+                myfont_close(font);
+                return 5;
+        }
+        free_glyph_bitmap(&bitmap);
+
         result = myfont_glyph_set_codepoint(font,glyph,0x3042);
         if(result != MYFONT_SUCCESS || expect_character(glyph,0x3042,2) != 0){
                 myfont_glyph_destroy(glyph);
                 myfont_close(font);
-                return 5;
+                return 6;
         }
 
         /* U+0041 はキャッシュ済みなので、件数を増やさず再利用する。 */
@@ -57,7 +80,7 @@ int main(int argc,char **argv){
         if(result != MYFONT_SUCCESS || expect_character(glyph,0x0041,2) != 0){
                 myfont_glyph_destroy(glyph);
                 myfont_close(font);
-                return 6;
+                return 7;
         }
 
         /* 未対応入力では、現在表示中のキャッシュを壊さない。 */
@@ -66,7 +89,7 @@ int main(int argc,char **argv){
                 expect_character(glyph,0x0041,2) != 0){
                 myfont_glyph_destroy(glyph);
                 myfont_close(font);
-                return 7;
+                return 8;
         }
 
         myfont_glyph_destroy(glyph);
