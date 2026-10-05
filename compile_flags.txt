@@ -3,3 +3,4 @@
 -IC:/msys64/mingw64/include/freetype2
 -Iinclude
 -Isrc/internal
+-DMYFONT_NO_VIEWER

@@ -43,6 +43,7 @@ library_sources=(
 
 common_compile_flags=(
         -std=c17
+        -DMYFONT_NO_VIEWER
         -Wall
         -Wextra
 )
